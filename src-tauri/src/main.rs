@@ -5,6 +5,7 @@ use tauri::{Manager, State};
 use serde::{Deserialize, Serialize};
 use std::sync::Mutex;
 use std::collections::HashMap;
+use cedar_core::{agent, cell, context, executor, llm, notebook, output_parser, deps};
 
 // State to manage research sessions
 struct AppState {
@@ -28,59 +29,117 @@ async fn start_research(
     request: ResearchRequest,
     state: State<'_, AppState>,
 ) -> Result<serde_json::Value, String> {
-    // In a real implementation, this would call your cedar-core backend
-    // For now, we'll return mock data
+    // Load environment variables
+    dotenv::dotenv().ok();
+    
+    // Create a new notebook context
+    let mut context = context::NotebookContext::new();
+    
+    // Generate the research plan using your real AI system
+    let cells = agent::generate_plan_from_goal(&request.goal, &mut context).await?;
+    
+    // Convert cells to JSON format for the frontend
+    let cells_json: Vec<serde_json::Value> = cells.iter().map(|cell| {
+        serde_json::json!({
+            "id": cell.id,
+            "type": match cell.cell_type {
+                cell::CellType::Intent => "intent",
+                cell::CellType::Plan => "plan", 
+                cell::CellType::Code => "code",
+                cell::CellType::Output => "output",
+                cell::CellType::Reference => "reference",
+                cell::CellType::Feedback => "validation",
+            },
+            "content": cell.content,
+            "timestamp": chrono::Utc::now().to_rfc3339()
+        })
+    }).collect();
+    
     let session_id = request.session_id.unwrap_or_else(|| format!("session_{}", chrono::Utc::now().timestamp()));
     
-    let mock_response = serde_json::json!({
+    let response = serde_json::json!({
         "sessionId": session_id,
         "status": "planning",
-        "cells": [
-            {
-                "id": "1",
-                "type": "intent",
-                "content": request.goal,
-                "timestamp": chrono::Utc::now().to_rfc3339()
-            },
-            {
-                "id": "2",
-                "type": "plan",
-                "content": "Load and examine the dataset",
-                "timestamp": chrono::Utc::now().to_rfc3339()
-            },
-            {
-                "id": "3",
-                "type": "code",
-                "content": "import pandas as pd\n\ndf = pd.read_csv('data.csv')\nprint(df.head())",
-                "timestamp": chrono::Utc::now().to_rfc3339()
-            }
-        ]
+        "cells": cells_json
     });
     
     // Store session in state
-    state.sessions.lock().unwrap().insert(session_id.clone(), mock_response.clone());
+    state.sessions.lock().unwrap().insert(session_id.clone(), response.clone());
     
-    Ok(mock_response)
+    Ok(response)
 }
 
 #[tauri::command]
 async fn execute_code(
     request: ExecuteCodeRequest,
-    state: State<'_, AppState>,
+    _state: State<'_, AppState>,
 ) -> Result<serde_json::Value, String> {
-    // In a real implementation, this would execute Python code via your cedar-core
-    let mock_output = serde_json::json!({
-        "output": "   col1  col2  col3\n0     1     2     3\n1     4     5     6\n2     7     8     9\n3    10    11    12\n4    13    14    15",
-        "validation": {
-            "isValid": true,
-            "confidence": 0.95,
-            "issues": [],
-            "suggestions": ["Consider adding data validation"],
-            "nextStep": "Proceed with analysis"
-        }
-    });
+    // Load environment variables
+    dotenv::dotenv().ok();
     
-    Ok(mock_output)
+    // Execute the Python code using your real executor
+    match executor::run_python_code(&request.code) {
+        Ok(output) => {
+            // Parse the output
+            let (output_type, formatted_output) = output_parser::parse_output(&output, false);
+            
+            // Create validation using your AI system
+            let validation = agent::validate_step_output(
+                "Code execution",
+                &request.code,
+                &formatted_output,
+                "Research goal", // You might want to pass the original goal here
+                &[], // Plan steps
+                0, // Current step index
+            ).await.unwrap_or_else(|_| agent::StepValidation {
+                is_valid: true,
+                confidence: 0.8,
+                issues: vec![],
+                suggestions: vec![],
+                next_step_recommendation: "Continue with analysis".to_string(),
+                user_action_needed: "continue".to_string(),
+            });
+            
+            let result = serde_json::json!({
+                "output": formatted_output,
+                "validation": {
+                    "isValid": validation.is_valid,
+                    "confidence": validation.confidence,
+                    "issues": validation.issues,
+                    "suggestions": validation.suggestions,
+                    "nextStep": validation.next_step_recommendation
+                }
+            });
+            
+            Ok(result)
+        }
+        Err(error) => {
+            // Try to auto-install missing packages
+            if let Ok(Some(package)) = deps::auto_install_if_missing(&error) {
+                // Retry execution after installing package
+                match executor::run_python_code(&request.code) {
+                    Ok(output) => {
+                        let (_, formatted_output) = output_parser::parse_output(&output, false);
+                        Ok(serde_json::json!({
+                            "output": formatted_output,
+                            "validation": {
+                                "isValid": true,
+                                "confidence": 0.9,
+                                "issues": vec![],
+                                "suggestions": vec![format!("Auto-installed package: {}", package)],
+                                "nextStep": "Continue with analysis"
+                            }
+                        }))
+                    }
+                    Err(retry_error) => {
+                        Err(format!("Failed to execute code after installing {}: {}", package, retry_error))
+                    }
+                }
+            } else {
+                Err(format!("Failed to execute code: {}", error))
+            }
+        }
+    }
 }
 
 #[tauri::command]
@@ -103,6 +162,9 @@ async fn load_session(
 }
 
 fn main() {
+    // Load environment variables at startup
+    dotenv::dotenv().ok();
+    
     tauri::Builder::default()
         .plugin(tauri_plugin_log::Builder::default().build())
         .manage(AppState {

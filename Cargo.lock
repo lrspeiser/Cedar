@@ -397,7 +397,9 @@ dependencies = [
 name = "cedar-app"
 version = "0.1.0"
 dependencies = [
+ "cedar-core",
  "chrono",
+ "dotenv",
  "log",
  "reqwest 0.12.22",
  "serde",
