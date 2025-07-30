@@ -1,2 +1,2 @@
 [workspace]
-members = ["cedar-core"]
+members = ["cedar-core", "src-tauri"]
