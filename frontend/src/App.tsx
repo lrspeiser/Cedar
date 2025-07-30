@@ -62,36 +62,45 @@ function App() {
 
   const handleSetApiKey = async () => {
     if (!apiKey.trim()) {
-      console.log('API key is empty, not submitting')
+      console.log('❌ API key is empty, not submitting')
       return
     }
-    
-    console.log('Starting API key submission...', { 
-      apiKeyLength: apiKey.length, 
+
+    console.log('🚀 Starting API key submission...', {
+      apiKeyLength: apiKey.length,
       apiKeyPrefix: apiKey.substring(0, 10) + '...',
-      isSettingApiKey 
+      isSettingApiKey,
+      showApiKeySetup,
+      apiKeySet
     })
-    
+
     setIsSettingApiKey(true)
     try {
-      console.log('Calling apiService.setApiKey...')
+      console.log('📞 Calling apiService.setApiKey...')
       await apiService.setApiKey(apiKey)
       console.log('✅ API key set successfully in backend')
-      
+
       // Update local state
       setApiKeySet(true)
       setShowApiKeySetup(false)
       setApiKey('')
-      
+
       console.log('✅ Screen transition: API key setup hidden, main app visible')
-      console.log('✅ Local state updated: apiKeySet=true, showApiKeySetup=false')
-      
+      console.log('✅ Local state updated: apiKeySet=true, showApiKeySetup=false, apiKey=""')
     } catch (error) {
       console.error('❌ Error setting API key:', error)
-      alert('Failed to set API key. Please try again.')
+      console.log('❌ Error details:', {
+        errorMessage: error instanceof Error ? error.message : String(error),
+        errorType: error?.constructor?.name,
+        errorStack: error instanceof Error ? error.stack : undefined
+      })
+      // Keep setup screen visible on error
+      setApiKeySet(false)
+      setShowApiKeySetup(true)
+      console.log('❌ Screen transition: API key setup remains visible due to error')
     } finally {
       setIsSettingApiKey(false)
-      console.log('✅ API key submission process completed')
+      console.log('🏁 API key submission process completed')
     }
   }
 
@@ -164,7 +173,8 @@ function App() {
             
             <button
               onClick={() => {
-                console.log('Button clicked!', { apiKey: apiKey.substring(0, 10) + '...', isSettingApiKey })
+                console.log('🔘 Button clicked!', { apiKey: apiKey.substring(0, 10) + '...', isSettingApiKey })
+                alert(`Button clicked! API key length: ${apiKey.length}, isSettingApiKey: ${isSettingApiKey}`)
                 handleSetApiKey()
               }}
               disabled={!apiKey.trim() || isSettingApiKey}

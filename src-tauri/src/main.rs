@@ -58,6 +58,8 @@ async fn start_research(
     request: ResearchRequest,
     state: State<'_, AppState>,
 ) -> Result<serde_json::Value, String> {
+    println!("🔍 Backend: Starting research for goal: {}", request.goal);
+    
     // Check if API key is set and clone it
     let api_key = {
         let api_key_guard = state.api_key.lock().unwrap();
@@ -65,17 +67,35 @@ async fn start_research(
     };
     
     if api_key.is_none() {
+        println!("❌ Backend: No API key found");
         return Err("OpenAI API key not set. Please set your API key first.".to_string());
     }
+    
+    println!("✅ Backend: API key found, setting environment variable");
     
     // Set the API key as environment variable for this session
     std::env::set_var("OPENAI_API_KEY", api_key.as_ref().unwrap());
     
+    println!("📝 Backend: Creating notebook context");
+    
     // Create a new notebook context
     let mut context = context::NotebookContext::new();
     
+    println!("🤖 Backend: Calling agent::generate_plan_from_goal");
+    
     // Generate the research plan using your real AI system
-    let cells = agent::generate_plan_from_goal(&request.goal, &mut context).await?;
+    let cells = match agent::generate_plan_from_goal(&request.goal, &mut context).await {
+        Ok(cells) => {
+            println!("✅ Backend: Successfully generated {} cells", cells.len());
+            cells
+        },
+        Err(e) => {
+            println!("❌ Backend: Error generating plan: {}", e);
+            return Err(format!("Failed to generate research plan: {}", e));
+        }
+    };
+    
+    println!("🔄 Backend: Converting cells to JSON format");
     
     // Convert cells to JSON format for the frontend
     let cells_json: Vec<serde_json::Value> = cells.iter().map(|cell| {
@@ -96,6 +116,8 @@ async fn start_research(
     
     let session_id = request.session_id.unwrap_or_else(|| format!("session_{}", chrono::Utc::now().timestamp()));
     
+    println!("💾 Backend: Creating response with session_id: {}", session_id);
+    
     let response = serde_json::json!({
         "sessionId": session_id,
         "status": "planning",
@@ -104,6 +126,8 @@ async fn start_research(
     
     // Store session in state
     state.sessions.lock().unwrap().insert(session_id.clone(), response.clone());
+    
+    println!("✅ Backend: Research started successfully");
     
     Ok(response)
 }

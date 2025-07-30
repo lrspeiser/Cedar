@@ -66,31 +66,17 @@ const ResearchSession: React.FC<ResearchSessionProps> = ({ session, onUpdate }) 
       })
     } catch (error) {
       console.error('Error starting research:', error)
-      // Fallback to mock data if API fails
-      const planCells: Cell[] = [
-        {
-          id: (Date.now() + 1).toString(),
-          type: 'plan',
-          content: 'Load and examine the dataset',
-          timestamp: new Date()
-        },
-        {
-          id: (Date.now() + 2).toString(),
-          type: 'code',
-          content: 'import pandas as pd\n\ndf = pd.read_csv("data.csv")\nprint(df.head())',
-          timestamp: new Date()
-        },
-        {
-          id: (Date.now() + 3).toString(),
-          type: 'plan',
-          content: 'Analyze the data and identify patterns',
-          timestamp: new Date()
-        }
-      ]
+      // Show error to user instead of fallback data
+      const errorCell: Cell = {
+        id: Date.now().toString(),
+        type: 'output',
+        content: `Error: ${error instanceof Error ? error.message : 'Failed to start research'}`,
+        timestamp: new Date()
+      }
       
       onUpdate({
-        cells: [...session.cells, intentCell, ...planCells],
-        status: 'executing'
+        cells: [...session.cells, intentCell, errorCell],
+        status: 'error'
       })
     }
     
@@ -135,29 +121,16 @@ const ResearchSession: React.FC<ResearchSessionProps> = ({ session, onUpdate }) 
       })
     } catch (error) {
       console.error('Error executing code:', error)
-      // Fallback to mock output
-      const outputCell: Cell = {
+      // Show error to user instead of fallback data
+      const errorCell: Cell = {
         id: Date.now().toString(),
         type: 'output',
-        content: '   col1  col2  col3\n0     1     2     3\n1     4     5     6\n2     7     8     9\n3    10    11    12\n4    13    14    15',
-        timestamp: new Date()
-      }
-      
-      const validationCell: Cell = {
-        id: (Date.now() + 1).toString(),
-        type: 'validation',
-        content: JSON.stringify({
-          isValid: true,
-          confidence: 0.95,
-          issues: [],
-          suggestions: ['Consider adding data validation'],
-          nextStep: 'Proceed with analysis'
-        }),
+        content: `Error: ${error instanceof Error ? error.message : 'Failed to execute code'}`,
         timestamp: new Date()
       }
       
       onUpdate({
-        cells: [...session.cells, outputCell, validationCell]
+        cells: [...session.cells, errorCell]
       })
     }
     
@@ -165,23 +138,8 @@ const ResearchSession: React.FC<ResearchSessionProps> = ({ session, onUpdate }) 
   }
 
   const addReference = () => {
-    const referenceCell: Cell = {
-      id: Date.now().toString(),
-      type: 'reference',
-      content: JSON.stringify({
-        title: 'Sample Research Paper',
-        authors: ['Smith, J.', 'Johnson, A.'],
-        journal: 'Journal of Data Science',
-        year: 2023,
-        url: 'https://example.com/paper',
-        relevance: 'Provides methodology for data analysis'
-      }),
-      timestamp: new Date()
-    }
-    
-    onUpdate({
-      cells: [...session.cells, referenceCell]
-    })
+    // This function is removed as it was creating mock data
+    // References should come from the real backend research process
   }
 
   return (
@@ -252,14 +210,6 @@ const ResearchSession: React.FC<ResearchSessionProps> = ({ session, onUpdate }) 
               >
                 <BookOpen className="h-4 w-4" />
                 <span>References</span>
-              </button>
-              
-              <button
-                onClick={addReference}
-                className="flex items-center space-x-2 px-3 py-2 text-gray-600 hover:bg-gray-100 rounded-lg transition-colors"
-              >
-                <FileText className="h-4 w-4" />
-                <span>Add Reference</span>
               </button>
             </div>
             

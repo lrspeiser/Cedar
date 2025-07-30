@@ -7,8 +7,32 @@ use std::env;
 
 /// Public API for the rest of the Cedar system to use.
 pub async fn ask_llm(prompt: &str) -> Result<String, String> {
-    let api_key = env::var("OPENAI_API_KEY").map_err(|_| "Missing OPENAI_API_KEY".to_string())?;
-    call_openai(prompt, &api_key).await
+    println!("🤖 LLM: Starting OpenAI API call");
+    
+    let api_key = match env::var("OPENAI_API_KEY") {
+        Ok(key) => {
+            println!("✅ LLM: Found API key (length: {})", key.len());
+            key
+        },
+        Err(_) => {
+            println!("❌ LLM: Missing OPENAI_API_KEY environment variable");
+            return Err("Missing OPENAI_API_KEY".to_string());
+        }
+    };
+    
+    println!("📞 LLM: Calling OpenAI API");
+    let result = call_openai(prompt, &api_key).await;
+    
+    match &result {
+        Ok(response) => {
+            println!("✅ LLM: Successfully received response (length: {})", response.len());
+        },
+        Err(e) => {
+            println!("❌ LLM: API call failed: {}", e);
+        }
+    }
+    
+    result
 }
 
 /// Low-level OpenAI wrapper (internal only)
@@ -32,6 +56,13 @@ async fn call_openai(prompt: &str, api_key: &str) -> Result<String, String> {
         .send()
         .await
         .map_err(|e| format!("Request error: {}", e))?;
+
+    // Check if the response is successful
+    if !res.status().is_success() {
+        let error_text = res.text().await.unwrap_or_else(|_| "Unknown error".to_string());
+        println!("❌ LLM: API returned error status: {} - {}", res.status(), error_text);
+        return Err(format!("OpenAI API error ({}): {}", res.status(), error_text));
+    }
 
     let body: OpenAIResponse = res
         .json()
