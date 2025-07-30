@@ -7,9 +7,10 @@ use std::sync::Mutex;
 use std::collections::HashMap;
 use cedar::{agent, cell, context, executor, output_parser, deps};
 
-// State to manage research sessions
+// State to manage research sessions and API key
 struct AppState {
     sessions: Mutex<HashMap<String, serde_json::Value>>,
+    api_key: Mutex<Option<String>>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -24,13 +25,45 @@ struct ExecuteCodeRequest {
     session_id: String,
 }
 
+#[derive(Debug, Serialize, Deserialize)]
+struct SetApiKeyRequest {
+    api_key: String,
+}
+
+#[tauri::command]
+async fn set_api_key(
+    request: SetApiKeyRequest,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    // Store the API key in memory (encrypted in production)
+    *state.api_key.lock().unwrap() = Some(request.api_key);
+    Ok(())
+}
+
+#[tauri::command]
+async fn get_api_key_status(
+    state: State<'_, AppState>,
+) -> Result<bool, String> {
+    Ok(state.api_key.lock().unwrap().is_some())
+}
+
 #[tauri::command]
 async fn start_research(
     request: ResearchRequest,
     state: State<'_, AppState>,
 ) -> Result<serde_json::Value, String> {
-    // Load environment variables
-    dotenv::dotenv().ok();
+    // Check if API key is set and clone it
+    let api_key = {
+        let api_key_guard = state.api_key.lock().unwrap();
+        api_key_guard.clone()
+    };
+    
+    if api_key.is_none() {
+        return Err("OpenAI API key not set. Please set your API key first.".to_string());
+    }
+    
+    // Set the API key as environment variable for this session
+    std::env::set_var("OPENAI_API_KEY", api_key.as_ref().unwrap());
     
     // Create a new notebook context
     let mut context = context::NotebookContext::new();
@@ -72,16 +105,26 @@ async fn start_research(
 #[tauri::command]
 async fn execute_code(
     request: ExecuteCodeRequest,
-    _state: State<'_, AppState>,
+    state: State<'_, AppState>,
 ) -> Result<serde_json::Value, String> {
-    // Load environment variables
-    dotenv::dotenv().ok();
+    // Check if API key is set and clone it
+    let api_key = {
+        let api_key_guard = state.api_key.lock().unwrap();
+        api_key_guard.clone()
+    };
+    
+    if api_key.is_none() {
+        return Err("OpenAI API key not set. Please set your API key first.".to_string());
+    }
+    
+    // Set the API key as environment variable for this session
+    std::env::set_var("OPENAI_API_KEY", api_key.as_ref().unwrap());
     
     // Execute the Python code using your real executor
     match executor::run_python_code(&request.code) {
         Ok(output) => {
             // Parse the output
-            let (output_type, formatted_output) = output_parser::parse_output(&output, false);
+            let (_output_type, formatted_output) = output_parser::parse_output(&output, false);
             
             // Create validation using your AI system
             let validation = agent::validate_step_output(
@@ -163,15 +206,15 @@ async fn load_session(
 }
 
 fn main() {
-    // Load environment variables at startup
-    dotenv::dotenv().ok();
-    
     tauri::Builder::default()
         .plugin(tauri_plugin_log::Builder::default().build())
         .manage(AppState {
             sessions: Mutex::new(HashMap::new()),
+            api_key: Mutex::new(None),
         })
         .invoke_handler(tauri::generate_handler![
+            set_api_key,
+            get_api_key_status,
             start_research,
             execute_code,
             save_session,

@@ -37,7 +37,30 @@ export interface ExecuteCodeResponse {
   }
 }
 
+export interface SetApiKeyRequest {
+  apiKey: string
+}
+
 class ApiService {
+  async setApiKey(apiKey: string): Promise<void> {
+    try {
+      await invoke('set_api_key', { request: { apiKey } })
+    } catch (error) {
+      console.error('Error setting API key:', error)
+      throw error
+    }
+  }
+
+  async getApiKeyStatus(): Promise<boolean> {
+    try {
+      const response = await invoke('get_api_key_status')
+      return response as boolean
+    } catch (error) {
+      console.error('Error getting API key status:', error)
+      throw error
+    }
+  }
+
   async startResearch(request: ResearchRequest): Promise<ResearchResponse> {
     try {
       const response = await invoke('start_research', { request })
@@ -78,45 +101,23 @@ class ApiService {
     }
   }
 
-  // Mock data for development fallback
+  // Mock data for development fallback (kept for robustness)
   private getMockResearchResponse(goal: string): ResearchResponse {
-    const sessionId = Date.now().toString()
-    const now = new Date().toISOString()
-
     return {
-      sessionId,
+      sessionId: 'mock-session',
       status: 'planning',
       cells: [
         {
           id: '1',
           type: 'intent',
-          content: goal,
-          timestamp: now
+          content: `Research Goal: ${goal}`,
+          timestamp: new Date().toISOString()
         },
         {
           id: '2',
           type: 'plan',
-          content: 'Load and examine the dataset',
-          timestamp: now
-        },
-        {
-          id: '3',
-          type: 'code',
-          content: 'import pandas as pd\n\ndf = pd.read_csv("data.csv")\nprint(df.head())',
-          timestamp: now
-        },
-        {
-          id: '4',
-          type: 'reference',
-          content: JSON.stringify({
-            title: 'Data Analysis with Python',
-            authors: ['McKinney, W.'],
-            journal: 'O\'Reilly Media',
-            year: 2017,
-            url: 'https://example.com/book',
-            relevance: 'Comprehensive guide to pandas and data analysis'
-          }),
-          timestamp: now
+          content: '1. Data collection\n2. Analysis\n3. Visualization',
+          timestamp: new Date().toISOString()
         }
       ]
     }
@@ -124,13 +125,13 @@ class ApiService {
 
   private getMockExecuteResponse(code: string): ExecuteCodeResponse {
     return {
-      output: '   col1  col2  col3\n0     1     2     3\n1     4     5     6\n2     7     8     9\n3    10    11    12\n4    13    14    15',
+      output: `Mock output for: ${code}`,
       validation: {
         isValid: true,
-        confidence: 0.95,
+        confidence: 0.8,
         issues: [],
-        suggestions: ['Consider adding data validation'],
-        nextStep: 'Proceed with analysis'
+        suggestions: ['Consider adding error handling'],
+        nextStep: 'Continue with analysis'
       }
     }
   }
