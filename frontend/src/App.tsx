@@ -137,9 +137,9 @@ function App() {
             <button
               onClick={handleSetApiKey}
               disabled={!apiKey.trim() || isSettingApiKey}
-              className="w-full bg-cedar-blue text-white py-2 px-4 rounded-md hover:bg-cedar-blue-dark disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+              className="w-full bg-cedar-blue text-white py-3 px-6 rounded-md hover:bg-cedar-blue-dark disabled:opacity-50 disabled:cursor-not-allowed transition-colors font-medium text-lg shadow-sm"
             >
-              {isSettingApiKey ? 'Setting...' : 'Set API Key'}
+              {isSettingApiKey ? 'Setting...' : 'Submit API Key'}
             </button>
             
             <div className="text-xs text-gray-500 text-center">
