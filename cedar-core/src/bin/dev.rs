@@ -3,7 +3,6 @@ use std::path::Path;
 
 use cedar::{
     agent,
-    cell::{CellOrigin, CellType, NotebookCell},
     deps,
     executor,
     notebook::Notebook,
