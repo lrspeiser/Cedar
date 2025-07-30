@@ -120,12 +120,12 @@ async fn execute_code(
                 match executor::run_python_code(&request.code) {
                     Ok(output) => {
                         let (_, formatted_output) = output_parser::parse_output(&output, false);
-                        let result: serde_json::Value = serde_json::json!({
+                        let result = serde_json::json!({
                             "output": formatted_output,
                             "validation": {
                                 "isValid": true,
                                 "confidence": 0.9,
-                                "issues": vec![],
+                                "issues": Vec::<String>::new(),
                                 "suggestions": vec![format!("Auto-installed package: {}", package)],
                                 "nextStep": "Continue with analysis"
                             }
