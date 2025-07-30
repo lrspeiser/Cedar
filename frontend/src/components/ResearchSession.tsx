@@ -49,7 +49,7 @@ const ResearchSession: React.FC<ResearchSessionProps> = ({ session, onUpdate }) 
     try {
       const response = await apiService.startResearch({
         goal: goal,
-        sessionId: session.id
+        session_id: session.id
       })
       
       // Convert API response cells to our format
@@ -106,7 +106,7 @@ const ResearchSession: React.FC<ResearchSessionProps> = ({ session, onUpdate }) 
     try {
       const response = await apiService.executeCode({
         code: cell.content,
-        sessionId: session.id
+        session_id: session.id
       })
       
       // Add output cell

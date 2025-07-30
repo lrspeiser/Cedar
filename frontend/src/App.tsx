@@ -34,6 +34,7 @@ function App() {
 
   // Check API key status on app load
   useEffect(() => {
+    console.log('🚀 App starting up, checking API key status...')
     checkApiKeyStatus()
   }, [])
 

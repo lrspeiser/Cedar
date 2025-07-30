@@ -35,8 +35,12 @@ async fn set_api_key(
     request: SetApiKeyRequest,
     state: State<'_, AppState>,
 ) -> Result<(), String> {
+    println!("🔧 Backend: Setting API key (length: {})", request.api_key.len());
+    
     // Store the API key in memory (encrypted in production)
     *state.api_key.lock().unwrap() = Some(request.api_key);
+    
+    println!("✅ Backend: API key stored successfully");
     Ok(())
 }
 
@@ -44,7 +48,9 @@ async fn set_api_key(
 async fn get_api_key_status(
     state: State<'_, AppState>,
 ) -> Result<bool, String> {
-    Ok(state.api_key.lock().unwrap().is_some())
+    let has_api_key = state.api_key.lock().unwrap().is_some();
+    println!("🔍 Backend: API key status check - Has API key: {}", has_api_key);
+    Ok(has_api_key)
 }
 
 #[tauri::command]

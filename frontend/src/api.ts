@@ -4,7 +4,7 @@ import { invoke } from '@tauri-apps/api/core'
 
 export interface ResearchRequest {
   goal: string
-  sessionId?: string
+  session_id?: string
 }
 
 export interface ResearchResponse {
@@ -23,7 +23,7 @@ export interface Cell {
 
 export interface ExecuteCodeRequest {
   code: string
-  sessionId: string
+  session_id: string
 }
 
 export interface ExecuteCodeResponse {
@@ -49,7 +49,7 @@ class ApiService {
         apiKeyPrefix: apiKey.substring(0, 10) + '...' 
       })
       
-      await invoke('set_api_key', { request: { apiKey } })
+      await invoke('set_api_key', { api_key: apiKey })
       
       console.log('✅ Backend response: API key stored successfully')
     } catch (error) {
@@ -73,7 +73,7 @@ class ApiService {
 
   async startResearch(request: ResearchRequest): Promise<ResearchResponse> {
     try {
-      const response = await invoke('start_research', { request })
+      const response = await invoke('start_research', request)
       return response as ResearchResponse
     } catch (error) {
       console.error('Error starting research:', error)
@@ -84,7 +84,7 @@ class ApiService {
 
   async executeCode(request: ExecuteCodeRequest): Promise<ExecuteCodeResponse> {
     try {
-      const response = await invoke('execute_code', { request })
+      const response = await invoke('execute_code', request)
       return response as ExecuteCodeResponse
     } catch (error) {
       console.error('Error executing code:', error)
