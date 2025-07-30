@@ -118,6 +118,25 @@ class ApiService {
           type: 'plan',
           content: '1. Data collection\n2. Analysis\n3. Visualization',
           timestamp: new Date().toISOString()
+        },
+        {
+          id: '3',
+          type: 'code',
+          content: 'import pandas as pd\nimport numpy as np\n\n# Load sample data\ndata = pd.DataFrame({\n    "temperature": np.random.normal(20, 10, 100),\n    "sales": np.random.normal(50, 20, 100)\n})\nprint("Data loaded successfully")\nprint(data.head())',
+          timestamp: new Date().toISOString()
+        },
+        {
+          id: '4',
+          type: 'reference',
+          content: JSON.stringify({
+            title: 'Data Analysis with Python',
+            authors: ['McKinney, W.'],
+            journal: 'O\'Reilly Media',
+            year: 2017,
+            url: 'https://example.com/book',
+            relevance: 'Comprehensive guide to pandas and data analysis'
+          }),
+          timestamp: new Date().toISOString()
         }
       ]
     }
@@ -125,7 +144,7 @@ class ApiService {
 
   private getMockExecuteResponse(code: string): ExecuteCodeResponse {
     return {
-      output: `Mock output for: ${code}`,
+      output: `Mock output for: ${code}\n\n   temperature     sales\n0    25.3         45.2\n1    18.7         38.9\n2    30.1         62.3\n3    15.2         29.8\n4    22.9         51.7`,
       validation: {
         isValid: true,
         confidence: 0.8,
