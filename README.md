@@ -1,6 +1,6 @@
 # 🌲 Cedar: Building an AI-Native Notebook from Scratch
 
-*How we built a Rust-powered, AI-driven research assistant that thinks like a data scientist*
+*How we built a Rust-powered, AI-driven research assistant that thinks like a data scientist and writes like an academic*
 
 ---
 
@@ -11,6 +11,9 @@ Traditional notebooks are great for exploration, but they're not built for the A
 - **Understand your research goals** in plain English
 - **Plan the entire workflow** automatically  
 - **Generate and execute code** step by step
+- **Validate results intelligently** and suggest improvements
+- **Generate academic references** automatically
+- **Publish complete papers** from research sessions
 - **Learn from outputs** and iterate intelligently
 - **Maintain context** across multiple sessions
 
@@ -20,228 +23,243 @@ That's Cedar. It's not just another Jupyter alternative—it's a complete reimag
 
 ## 🏗️ Architecture Decisions
 
-### Why Rust?
+### **Why Rust?**
+Performance, safety, and cross-platform compatibility. Rust gives us:
+- **Memory safety** without garbage collection
+- **Concurrent execution** for LLM calls and code execution
+- **Cross-platform binaries** that work anywhere
+- **Rich ecosystem** for data processing and web APIs
 
-We chose Rust for the backend for several reasons:
-
-1. **Performance**: Python code execution needs to be fast and reliable
-2. **Memory Safety**: No segfaults when dealing with external processes
-3. **Cross-platform**: Native binaries for macOS, Linux, Windows
-4. **Ecosystem**: Excellent async runtime with `tokio` and robust HTTP clients
-
-```rust
-// Example: Our async Python executor
-pub async fn run_python_code(code: &str) -> Result<String, String> {
-    let output = Command::new("python3")
-        .arg("-c")
-        .arg(code)
-        .output()
-        .await
-        .map_err(|e| format!("Failed to run Python: {}", e))?;
-    
-    if output.status.success() {
-        Ok(String::from_utf8_lossy(&output.stdout).to_string())
-    } else {
-        Err(String::from_utf8_lossy(&output.stderr).to_string())
-    }
-}
-```
-
-### Session Management: The Key Innovation
-
-One of our biggest challenges was maintaining Python session state across multiple code cells. Here's how we solved it:
+### **Session Management: The Key Innovation**
+Unlike traditional notebooks that execute cells in isolation, Cedar maintains **persistent Python sessions**:
 
 ```rust
-// We accumulate code and track output differences
+// Session management in research.rs
 let mut session_code = String::new();
 let mut previous_output = String::new();
 
-for cell in plan_cells {
+for cell in plan_cells.iter().enumerate() {
+    if cell.cell_type != CellType::Code {
+        continue;
+    }
+    
+    // Add this cell's code to the session
     session_code.push_str(&cell.content);
     session_code.push('\n');
     
+    // Execute the full session to maintain state
     match executor::run_python_code(&session_code) {
         Ok(stdout) => {
-            // Only show new output, not duplicates
+            // Extract only the new output by comparing with previous output
             let new_output = if stdout.starts_with(&previous_output) {
                 stdout[previous_output.len()..].trim()
             } else {
                 &stdout
             };
             
+            // Display only new results
             if !new_output.is_empty() {
-                println!("📊 New output: {}", new_output);
+                let (output_type, formatted) = output_parser::parse_output(new_output, false);
+                println!("\n📊 Output ({:?}):\n{}", output_type, formatted);
             }
+            
             previous_output = stdout;
         }
-        Err(e) => handle_error(e),
+        Err(stderr) => {
+            // Handle errors with auto-package installation
+            if let Ok(Some(pkg)) = deps::auto_install_if_missing(&stderr) {
+                println!("✅ Retrying after installing: {pkg}");
+                // Retry execution...
+            }
+        }
     }
 }
 ```
 
-This approach ensures that:
-- ✅ Variables persist between cells
-- ✅ No duplicate output from previous executions
-- ✅ Clean, incremental results display
-- ✅ Proper error handling and recovery
+This ensures **no duplicate output** and **proper state persistence** across cells.
 
-### LLM Integration: Structured Planning
-
-Instead of free-form chat, we use structured JSON responses for reliable parsing:
+### **LLM Integration: Structured Over Chat**
+Instead of free-form chat, Cedar uses **structured JSON responses**:
 
 ```rust
+// Structured plan generation in agent.rs
 #[derive(Debug, Deserialize)]
-struct PlanBundle {
+pub struct PlanBundle {
     total_steps: usize,
     steps: Vec<PlanStep>,
 }
 
-#[derive(Debug, Deserialize)]
-struct PlanStep {
-    label: String,
-    description: String,
-    code: Option<String>,
+#[derive(Debug, Deserialize, Clone)]
+pub struct PlanStep {
+    pub label: String,
+    pub description: String,
+    pub code: Option<String>,
 }
+
+// LLM prompt for structured output
+let prompt = format!(
+    r#"Return a JSON object with:
+- `total_steps`: number of plan steps
+- `steps`: list of steps (each with a label, description, optional code)
+
+Each step must include:
+- `label`: one of "python", "data", "plot", "discussion"
+- `description`: what the step does
+- optional `code`: Python code only for executable steps
+
+Do not explain your output. Return valid JSON only."#
+);
 ```
 
-This allows us to:
-- **Parse plans reliably** without regex hacks
-- **Generate executable code** directly from the LLM
-- **Track progress** through structured steps
-- **Handle errors gracefully** with type safety
+This ensures **reliable parsing** and **consistent structure**.
 
 ---
 
-## 🧠 How It Works: A Deep Dive
+## 🔧 Technical Implementation
 
-### 1. Goal Understanding
-
-When you say *"Find the top 3 product categories associated with churn"*, Cedar:
-
-1. **Analyzes the goal** using context from previous sessions
-2. **Checks available datasets** in your workspace
-3. **Generates a structured plan** with specific steps
+### **1. Goal Understanding**
+Cedar parses research goals and generates structured plans:
 
 ```rust
+// Goal parsing and plan generation
 pub async fn generate_plan_from_goal(
     goal: &str,
     context: &mut NotebookContext,
 ) -> Result<Vec<NotebookCell>, String> {
-    let known = storage::list_known_datasets();
-    let context_vars = context.variables.iter()
-        .map(|(k, v)| format!("{} = {}", k, v))
-        .collect::<Vec<_>>()
-        .join(", ");
-
-    let prompt = format!(
-        r#"Given the research goal: "{goal}"
-        
-        Known variables: {context_vars}
-        
-        Return a JSON object with:
-        - `total_steps`: number of plan steps  
-        - `steps`: list of steps (each with label, description, optional code)
-        
-        Each step must include:
-        - `label`: one of "python", "data", "plot", "discussion"
-        - `description`: what the step does
-        - optional `code`: Python code only for executable steps"#
-    );
-
+    // Generate structured plan using LLM
     let raw_json = llm::ask_llm(&prompt).await?;
     let parsed: PlanBundle = serde_json::from_str(&raw_json)?;
     
-    // Convert to notebook cells
-    Ok(parsed.steps.into_iter().map(|step| {
-        NotebookCell::new(CellType::Plan, CellOrigin::Ai, &step.description)
-    }).collect())
-}
-```
-
-### 2. Intelligent Code Generation
-
-Cedar generates clean, executable Python code without markdown formatting:
-
-```rust
-pub async fn generate_code_for_step(step_description: &str) -> Result<NotebookCell, String> {
-    let prompt = format!(
-        "Write a clean Python code snippet to complete this task:\n\n\"{}\"\n\nIMPORTANT: Return ONLY the Python code without any markdown formatting, backticks, or explanations. Just the raw Python code that can be executed directly.",
-        step_description
-    );
-
-    let code_text = llm::ask_llm(&prompt).await?;
-    Ok(NotebookCell::new(CellType::Code, CellOrigin::Ai, &code_text))
-}
-```
-
-### 3. Smart Dependency Management
-
-When Python code fails due to missing packages, Cedar automatically installs them:
-
-```rust
-pub fn auto_install_if_missing(error_msg: &str) -> Result<Option<String>, String> {
-    // Common import error patterns
-    let patterns = [
-        (r"No module named '(\w+)'", "$1"),
-        (r"ModuleNotFoundError: No module named '(\w+)'", "$1"),
-    ];
-
-    for (pattern, replacement) in patterns {
-        if let Some(captures) = Regex::new(pattern).unwrap().captures(error_msg) {
-            let package = captures[1].to_string();
-            install_package(&package)?;
-            return Ok(Some(package));
+    // Generate academic references
+    let references = generate_references_for_goal(goal, &parsed.steps).await?;
+    cells.extend(references);
+    
+    // Convert plan steps to notebook cells
+    for step in parsed.steps {
+        let desc_cell = NotebookCell::new(CellType::Plan, CellOrigin::Ai, &step.description);
+        cells.push(desc_cell);
+        
+        if let Some(code) = step.code {
+            let code_cell = NotebookCell::new(CellType::Code, CellOrigin::Ai, &code);
+            cells.push(code_cell);
         }
     }
-    Ok(None)
-}
-
-fn install_package(pkg: &str) -> Result<(), String> {
-    let output = Command::new("python3")
-        .arg("-m")
-        .arg("pip")
-        .arg("install")
-        .arg("--break-system-packages") // Handle externally managed environments
-        .arg(pkg)
-        .output()
-        .map_err(|e| format!("Failed to run pip: {}", e))?;
-
-    if output.status.success() {
-        Ok(())
-    } else {
-        Err(format!("Failed to install {}: {}", pkg, 
-            String::from_utf8_lossy(&output.stderr)))
-    }
+    
+    Ok(cells)
 }
 ```
 
-### 4. Context-Aware Execution
-
-Cedar maintains a glossary of scientific terms and tracks variables across sessions:
+### **2. Intelligent Validation System**
+After each step, Cedar validates results and suggests improvements:
 
 ```rust
-#[derive(Debug, Clone)]
-pub struct NotebookContext {
-    pub variables: HashMap<String, String>,
-    pub glossary: HashMap<String, String>,
-}
+// Step validation in agent.rs
+pub async fn validate_step_output(
+    step_description: &str,
+    step_code: &str,
+    step_output: &str,
+    original_goal: &str,
+    all_steps: &[PlanStep],
+    current_step_index: usize,
+) -> Result<StepValidation, String> {
+    let prompt = format!(
+        r#"Analyze this step's output and determine:
 
-impl NotebookContext {
-    pub fn update_from_code(&mut self, code: &str) {
-        // Extract variable assignments
-        for line in code.lines() {
-            let line = line.trim();
-            if let Some(pos) = line.find('=') {
-                let var_name = line[..pos].trim();
-                if var_name.chars().all(|c| c.is_alphanumeric() || c == '_') {
-                    let value = line[pos + 1..].trim();
-                    if !value.is_empty() {
-                        self.set_variable(var_name, value);
-                    }
-                }
+1. Does the output make sense for this step?
+2. Does it align with the research goal?
+3. Are there any obvious issues (errors, unexpected results, missing data)?
+4. What should be the next logical step?
+
+Return ONLY a JSON object with:
+{{
+  "is_valid": true/false,
+  "confidence": 0.0-1.0,
+  "issues": ["list of specific issues found"],
+  "suggestions": ["list of improvement suggestions"],
+  "next_step_recommendation": "what should happen next",
+  "user_action_needed": "continue|revise|restart|ask_user"
+}}"#
+    );
+    
+    let raw_json = llm::ask_llm(&prompt).await?;
+    let validation: StepValidation = serde_json::from_str(&raw_json)?;
+    Ok(validation)
+}
+```
+
+### **3. Academic Reference Generation**
+Cedar automatically generates relevant academic references:
+
+```rust
+// Reference generation in agent.rs
+async fn generate_references_for_goal(
+    goal: &str,
+    steps: &[PlanStep],
+) -> Result<Vec<NotebookCell>, String> {
+    let prompt = format!(
+        r#"Given this research goal and plan steps, suggest 3-5 relevant academic references.
+
+Return ONLY a JSON array of reference objects. Each reference should include:
+- `title`: Full title of the paper/book/website
+- `authors`: Array of author names (if available)
+- `journal`: Journal name or publication venue (if applicable)
+- `year`: Publication year (if known)
+- `url`: URL to the source (if available)
+- `doi`: DOI identifier (if available)
+- `abstract`: Brief description or abstract (if available)
+- `relevance`: Why this reference is relevant to the research goal
+
+Focus on high-quality, peer-reviewed sources when possible."#
+    );
+    
+    let raw_json = llm::ask_llm(&prompt).await?;
+    let references: Vec<ReferenceData> = serde_json::from_str(&raw_json)?;
+    
+    let mut cells = vec![];
+    for reference in references {
+        let reference_cell = NotebookCell::new_reference(CellOrigin::Ai, &reference);
+        cells.push(reference_cell);
+    }
+    
+    Ok(cells)
+}
+```
+
+### **4. Publication Pipeline**
+After successful research, Cedar can generate complete academic papers:
+
+```rust
+// Publication system in publication.rs
+pub async fn generate_paper_from_session(
+    original_goal: &str,
+    session_id: &str,
+    cells: &[NotebookCell],
+) -> Result<AcademicPaper, String> {
+    let mut paper = AcademicPaper::new(original_goal, session_id, cells);
+    
+    // Extract references from cells
+    for cell in cells {
+        if cell.cell_type == CellType::Reference {
+            if let Ok(ref_data) = serde_json::from_str::<ReferenceData>(&cell.content) {
+                paper.references.push(ref_data);
             }
         }
     }
+    
+    // Extract the research process and results
+    let (process_summary, results_summary) = extract_session_summary(cells);
+    
+    // Generate paper sections using LLM
+    paper.title = generate_title(original_goal).await?;
+    paper.abstract_text = generate_abstract(original_goal, &results_summary).await?;
+    paper.keywords = generate_keywords(original_goal).await?;
+    paper.introduction = generate_introduction(original_goal).await?;
+    paper.methodology = generate_methodology(&process_summary).await?;
+    paper.results = generate_results(&results_summary).await?;
+    paper.discussion = generate_discussion(original_goal, &results_summary).await?;
+    paper.conclusion = generate_conclusion(original_goal, &results_summary).await?;
+    
+    Ok(paper)
 }
 ```
 
@@ -249,292 +267,299 @@ impl NotebookContext {
 
 ## 🚀 Getting Started
 
-### Prerequisites
+### **Prerequisites**
+- Rust 1.70+ and Cargo
+- Python 3.8+ with pip
+- OpenAI API key
 
-- **Rust** (latest stable)
-- **Python 3.8+** with pip
-- **OpenAI API key** (for LLM integration)
-
-### Installation
-
-1. **Clone the repository:**
+### **Installation**
 ```bash
+# Clone the repository
 git clone https://github.com/yourusername/cedar.git
 cd cedar
-```
 
-2. **Set up environment variables:**
-```bash
-# Create .env file
+# Create environment file
 echo "OPENAI_API_KEY=sk-your-real-secret-key" > .env
+
+# Build the project
+cargo build -p cedar-core
 ```
 
-3. **Build and run:**
-```bash
-# Development mode
-cargo run -p cedar-core --bin dev
+### **Running Cedar**
 
-# Interactive research assistant
+#### **Interactive Research Assistant**
+```bash
 cargo run -p cedar-core --bin research
+```
+This starts an interactive session where you can:
+- Enter your research goal in plain English
+- Watch Cedar generate a plan with references
+- See code execution with intelligent validation
+- Choose to publish results as an academic paper
+
+#### **Development Environment**
+```bash
+cargo run -p cedar-core --bin dev
+```
+Runs a predefined research workflow for testing and development.
+
+#### **Test Individual Components**
+```bash
+# Test session management
+cargo run -p cedar-core --bin test_session
+
+# Test publication system
+cargo run -p cedar-core --bin test_publication
 
 # Test storage functionality
 cargo run -p cedar-core --bin storage_test
 ```
 
-### Project Structure
+---
 
-```
-cedar/
-├── cedar-core/                 # Rust backend
-│   ├── src/
-│   │   ├── agent.rs           # LLM-powered planning
-│   │   ├── executor.rs        # Python code execution
-│   │   ├── llm.rs             # OpenAI API integration
-│   │   ├── deps.rs            # Package management
-│   │   ├── context.rs         # Session state management
-│   │   ├── storage.rs         # Dataset manifests
-│   │   └── bin/               # Executable binaries
-│   │       ├── dev.rs         # Development runner
-│   │       ├── research.rs    # Interactive assistant
-│   │       └── storage_test.rs # Storage testing
-│   └── Cargo.toml
-├── frontend/                   # React frontend (future)
-├── notebooks/                  # Saved notebook files
-├── prompts/                    # LLM prompt templates
-├── .env                        # Environment variables
-└── .gitignore                  # Git exclusions
-```
+## 📊 Example Workflow
 
-### Your First Research Session
-
-1. **Start the research assistant:**
-```bash
-cargo run -p cedar-core --bin research
-```
-
-2. **Describe your goal:**
+### **1. Define Research Goal**
 ```
 🧑 What do you want to research?
 > Find the top 3 product categories associated with churn
 ```
 
-3. **Watch Cedar work:**
+### **2. Automatic Plan Generation**
 ```
-🧠 Cedar Research Assistant
+📚 RELEVANT REFERENCES:
+--- Reference 1 ---
+📖 Title: Customer Churn Prediction Using Machine Learning
+👥 Authors: Smith, J., Johnson, A.
+📰 Journal: Journal of Marketing Analytics
+📅 Year: 2022
+🎯 Relevance: Directly addresses churn analysis methodology
 
 📝 PLAN:
-- [PLAN] Load customer dataset and examine structure
-- [CODE] import pandas as pd; df = pd.read_csv('customers.csv')
-- [PLAN] Identify churn indicators and filter data
-- [CODE] churned = df[df['churn'] == 1]
-- [PLAN] Analyze product usage patterns for churned customers
-- [CODE] product_usage = churned.groupby('product_category').size().sort_values(ascending=False)
+- [PLAN] Load the dataset
+- [CODE] df = pd.read_csv('churn_data.csv')
+- [PLAN] Clean up the data by removing null/missing values
+- [CODE] df = df.dropna()
+- [PLAN] Create a subset of data containing only churned customers
+- [CODE] churned_customers_df = df[df['churn'] == 1]
+```
 
+### **3. Intelligent Execution with Validation**
+```
 🔧 Step 1: Executing code:
-import pandas as pd; df = pd.read_csv('customers.csv')
+df = pd.read_csv('churn_data.csv')
 
-📊 Output (Text): 
-Successfully loaded 10,000 customer records
+📊 Output (Json):
+[1, 2, 3, 4, 5]
 
-🔧 Step 2: Executing code:
-churned = df[df['churn'] == 1]
+🔍 Validating step output...
 
-📊 Output (Text):
-Filtered to 1,200 churned customers
+🔍 VALIDATION RESULTS:
+Valid: ✅ Yes
+Confidence: 100.0%
 
-🔧 Step 3: Executing code:
-product_usage = churned.groupby('product_category').size().sort_values(ascending=False)
+🎯 Next step: Proceed to calculate the mean of the list.
+Action needed: continue
+✅ Continuing to next step...
+```
 
-📊 Output (Table):
-| Product Category | Churned Customers |
-|------------------|-------------------|
-| Electronics      | 450               |
-| Clothing         | 320               |
-| Home & Garden    | 280               |
-| Books            | 150               |
+### **4. Publication Opportunity**
+```
+📄 PUBLICATION OPPORTUNITY
+Your research session has been completed successfully!
+Would you like to generate an academic paper from this research?
+This will create a complete paper including:
+  • Abstract and keywords
+  • Introduction and methodology
+  • Results and discussion
+  • Conclusion and references
+  • Both JSON and Markdown formats
+
+🤔 Generate academic paper? (y/n): y
+
+📝 Generating academic paper...
+✅ Paper generated successfully!
+📊 Paper stats:
+  • Title: Customer Churn Analysis: Identifying High-Risk Product Categories
+  • Word count: 2,847
+  • References: 4
+💾 JSON saved to: papers/customer_churn_analysis.json
+💾 Markdown saved to: papers/customer_churn_analysis.md
 ```
 
 ---
 
-## 🔧 Advanced Features
+## 🏛️ Project Structure
 
-### Custom Dataset Integration
-
-Cedar can work with your existing datasets through manifest files:
-
-```rust
-#[derive(Debug, Serialize, Deserialize)]
-pub struct DatasetManifest {
-    pub name: String,
-    pub source: String,
-    pub query: String,
-    pub record_count: Option<u64>,
-    pub description: Option<String>,
-    pub created_unix: u64,
-}
 ```
-
-### Code Preprocessing
-
-Cedar automatically wraps standalone expressions with `print()` for visibility:
-
-```rust
-pub fn preprocess(code: &str) -> String {
-    let mut lines: Vec<String> = code.lines().map(|s| s.to_string()).collect();
-    if let Some(last_line) = lines.last().cloned() {
-        let stripped = last_line.trim();
-        
-        // Skip if already a print, assignment, def, or import
-        let is_expression = !stripped.starts_with("print")
-            && !stripped.starts_with("def ")
-            && !stripped.starts_with("import")
-            && !stripped.contains('=');
-
-        if is_expression {
-            lines.pop();
-            lines.push(format!("print({})", stripped));
-        }
-    }
-    
-    lines.join("\n")
-}
-```
-
-### Output Parsing
-
-Cedar intelligently parses Python output into structured formats:
-
-```rust
-pub fn parse_output(output: &str, is_error: bool) -> (OutputType, String) {
-    if is_error {
-        return (OutputType::Error, output.to_string());
-    }
-    
-    // Try to parse as JSON
-    if let Ok(json) = serde_json::from_str::<serde_json::Value>(output) {
-        return (OutputType::Json, serde_json::to_string_pretty(&json).unwrap());
-    }
-    
-    // Try to parse as table
-    if output.contains('|') && output.lines().count() > 2 {
-        return (OutputType::Table, output.to_string());
-    }
-    
-    // Default to text
-    (OutputType::Text, output.to_string())
-}
+cedar/
+├── cedar-core/                 # Main Rust application
+│   ├── src/
+│   │   ├── agent.rs           # LLM interaction and plan generation
+│   │   ├── cell.rs            # Notebook cell types and structures
+│   │   ├── context.rs         # Session context and state management
+│   │   ├── deps.rs            # Python package auto-installation
+│   │   ├── executor.rs        # Python code execution
+│   │   ├── llm.rs             # OpenAI API integration
+│   │   ├── notebook.rs        # Notebook data structures
+│   │   ├── output_parser.rs   # Output formatting and parsing
+│   │   ├── publication.rs     # Academic paper generation
+│   │   ├── storage.rs         # Dataset and manifest management
+│   │   └── bin/               # Executable binaries
+│   │       ├── research.rs    # Interactive research assistant
+│   │       ├── dev.rs         # Development environment
+│   │       ├── test_session.rs # Session management testing
+│   │       └── test_publication.rs # Publication system testing
+│   └── Cargo.toml             # Rust dependencies
+├── frontend/                  # Future web interface
+├── notebooks/                 # Saved research sessions
+├── papers/                    # Generated academic papers
+├── prompts/                   # LLM prompt templates
+└── README.md                  # This file
 ```
 
 ---
 
-## 🎯 Why These Design Choices?
+## 🔬 Key Features
 
-### 1. **Session Persistence Over Chat**
+### **🧠 Intelligent Planning**
+- **Goal understanding** in natural language
+- **Multi-step plan generation** with code suggestions
+- **Context-aware planning** based on available data
 
-Unlike ChatGPT, Cedar maintains full Python session state. This means:
-- Variables persist between cells
-- Large datasets don't need to be reloaded
-- Complex workflows can span multiple interactions
+### **🔍 Smart Validation**
+- **Real-time result validation** after each step
+- **Intelligent error detection** and suggestions
+- **User-controlled feedback loops** (no infinite loops)
+- **Confidence scoring** for each validation
 
-### 2. **Structured Over Free-form**
+### **📚 Academic Integration**
+- **Automatic reference generation** from research goals
+- **Structured reference data** with metadata
+- **Academic paper generation** with full sections
+- **Multiple output formats** (JSON, Markdown)
 
-We use JSON responses instead of natural language because:
-- **Reliability**: No parsing ambiguities
-- **Type Safety**: Rust can validate the structure
-- **Consistency**: Predictable output format
-- **Extensibility**: Easy to add new fields
+### **⚡ Robust Execution**
+- **Persistent Python sessions** with state management
+- **Auto-package installation** for missing dependencies
+- **Error recovery** with intelligent retry logic
+- **Output deduplication** for clean results
 
-### 3. **Rust Backend Over Pure Python**
-
-While Python is great for data science, Rust provides:
-- **Performance**: Faster startup and execution
-- **Safety**: Memory-safe process management
-- **Distribution**: Single binary deployment
-- **Concurrency**: Async execution with tokio
-
-### 4. **Incremental Over Batch**
-
-Cedar executes code incrementally rather than in one batch because:
-- **Feedback**: Users can see progress and intervene
-- **Debugging**: Easier to identify where things go wrong
-- **Iteration**: Can modify approach based on intermediate results
-- **Memory**: Doesn't load everything into memory at once
+### **📄 Publication Pipeline**
+- **Complete academic papers** from research sessions
+- **Structured sections** (Abstract, Introduction, Methodology, etc.)
+- **Reference integration** from research session
+- **Professional formatting** for submission
 
 ---
 
-## 🔮 What's Next?
+## 🛠️ Development
 
-### Short Term
-- [ ] **Web UI**: React frontend with real-time cell updates
-- [ ] **Chart Integration**: Automatic visualization of data outputs
-- [ ] **Export Options**: PDF reports, Jupyter notebooks, markdown
-- [ ] **Plugin System**: Custom data connectors and processors
+### **Adding New Cell Types**
+```rust
+// In cell.rs
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub enum CellType {
+    Intent,
+    Plan,
+    Code,
+    Output,
+    Feedback,
+    Reference,  // New cell type
+}
+```
 
-### Medium Term
-- [ ] **Collaborative Editing**: Real-time multi-user notebooks
-- [ ] **Version Control**: Git integration for notebook history
-- [ ] **Cloud Deployment**: Hosted Cedar instances
-- [ ] **Advanced LLMs**: Claude, local models, custom fine-tuned models
+### **Extending Validation Logic**
+```rust
+// In agent.rs
+pub async fn validate_step_output(
+    step_description: &str,
+    step_code: &str,
+    step_output: &str,
+    original_goal: &str,
+    all_steps: &[PlanStep],
+    current_step_index: usize,
+) -> Result<StepValidation, String> {
+    // Add custom validation logic here
+}
+```
 
-### Long Term
-- [ ] **Multi-language Support**: R, Julia, SQL execution
-- [ ] **Distributed Computing**: Spark, Dask integration
-- [ ] **ML Pipeline Integration**: AutoML, model training workflows
-- [ ] **Enterprise Features**: RBAC, audit logs, compliance
+### **Custom Publication Formats**
+```rust
+// In publication.rs
+impl AcademicPaper {
+    pub fn to_latex(&self) -> String {
+        // Generate LaTeX format
+    }
+    
+    pub fn to_html(&self) -> String {
+        // Generate HTML format
+    }
+}
+```
 
 ---
 
 ## 🤝 Contributing
 
-Cedar is built in the open, and we welcome contributions! Here's how to get started:
+We welcome contributions! Here's how to get started:
 
 1. **Fork the repository**
-2. **Create a feature branch**: `git checkout -b feature/amazing-feature`
-3. **Make your changes** with tests
-4. **Run the test suite**: `cargo test`
+2. **Create a feature branch** (`git checkout -b feature/amazing-feature`)
+3. **Make your changes** and add tests
+4. **Run the test suite** (`cargo test -p cedar-core`)
 5. **Submit a pull request**
 
-### Development Setup
-
-```bash
-# Install dependencies
-cargo build
-
-# Run tests
-cargo test
-
-# Run linter
-cargo clippy
-
-# Format code
-cargo fmt
-```
-
-### Areas We'd Love Help With
-
-- **Frontend Development**: React/TypeScript UI components
-- **LLM Integration**: Support for additional models and providers
-- **Data Connectors**: Database adapters, API integrations
-- **Documentation**: Tutorials, examples, API docs
-- **Testing**: Unit tests, integration tests, performance benchmarks
+### **Development Guidelines**
+- Follow Rust conventions and use `cargo fmt`
+- Add tests for new functionality
+- Update documentation for API changes
+- Ensure all binaries compile successfully
 
 ---
 
-## 📚 Learn More
+## 📈 Roadmap
 
-- **Architecture Deep Dive**: [docs/architecture.md](docs/architecture.md)
-- **API Reference**: [docs/api.md](docs/api.md)
-- **Contributing Guide**: [CONTRIBUTING.md](CONTRIBUTING.md)
-- **Changelog**: [CHANGELOG.md](CHANGELOG.md)
+### **Phase 1: Core Features** ✅
+- [x] Basic notebook functionality
+- [x] LLM integration for plan generation
+- [x] Python code execution
+- [x] Session management
+- [x] Reference generation
+- [x] Validation system
+- [x] Publication pipeline
+
+### **Phase 2: Enhanced Intelligence** 🚧
+- [ ] Multi-modal input (images, charts)
+- [ ] Advanced error recovery
+- [ ] Collaborative research sessions
+- [ ] Version control integration
+- [ ] Custom prompt templates
+
+### **Phase 3: Platform Features** 📋
+- [ ] Web interface
+- [ ] Cloud deployment
+- [ ] Real-time collaboration
+- [ ] Advanced analytics dashboard
+- [ ] Integration with academic databases
 
 ---
 
 ## 📄 License
 
-MIT License - see [LICENSE](LICENSE) for details.
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
 
 ---
 
-*Built with ❤️ by the Cedar team. Questions? Open an issue or join our [Discord](https://discord.gg/cedar).*
+## 🙏 Acknowledgments
+
+- **OpenAI** for providing the GPT models that power Cedar's intelligence
+- **Rust community** for the excellent ecosystem and tooling
+- **Python community** for the rich data science libraries
+- **Academic community** for inspiring the publication features
+
+---
+
+*Cedar: Where research meets intelligence, and intelligence meets publication.* 🌲✨
 
 
