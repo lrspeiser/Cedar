@@ -19,3 +19,11 @@ path = "src/lib.rs"
 [[bin]]
 name = "dev"
 path = "src/bin/dev.rs"
+
+[[bin]]
+name = "storage_test"
+path = "src/bin/storage_test.rs"
+
+[[bin]]
+name = "research"
+path = "src/bin/research.rs"

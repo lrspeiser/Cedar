@@ -1,0 +1,8 @@
+{
+  "name": "gaia outer disk",
+  "source": "ESA Gaia DR3",
+  "query": "SELECT * FROM gaia WHERE distance BETWEEN 5 AND 20",
+  "record_count": 124000,
+  "description": "Chunked in 1M rows; covers galactic plane",
+  "created_unix": 1753839882
+}
