@@ -44,13 +44,71 @@ async fn main() -> Result<(), String> {
 
     // Generate plan using LLM (returns structured Vec<NotebookCell>)
     let plan_cells = agent::generate_plan_from_goal(goal, &mut context).await?;
-    println!("\n📝 PLAN:");
+    
+    // Separate references from other cells for better display
+    let mut references = Vec::new();
+    let mut other_cells = Vec::new();
+    
     for cell in &plan_cells {
+        match cell.cell_type {
+            CellType::Reference => references.push(cell),
+            _ => other_cells.push(cell),
+        }
+    }
+    
+    // Display references first
+    if !references.is_empty() {
+        println!("\n📚 RELEVANT REFERENCES:");
+        for (i, cell) in references.iter().enumerate() {
+            println!("\n--- Reference {} ---", i + 1);
+            // Try to parse and display the reference nicely
+            if let Ok(ref_data) = serde_json::from_str::<serde_json::Value>(&cell.content) {
+                if let Some(obj) = ref_data.as_object() {
+                    if let Some(title) = obj.get("title") {
+                        println!("📖 Title: {}", title.as_str().unwrap_or("Unknown"));
+                    }
+                    if let Some(authors) = obj.get("authors") {
+                        if let Some(authors_array) = authors.as_array() {
+                            let authors_str: Vec<String> = authors_array
+                                .iter()
+                                .filter_map(|a| a.as_str().map(|s| s.to_string()))
+                                .collect();
+                            if !authors_str.is_empty() {
+                                println!("👥 Authors: {}", authors_str.join(", "));
+                            }
+                        }
+                    }
+                    if let Some(journal) = obj.get("journal") {
+                        println!("📰 Journal: {}", journal.as_str().unwrap_or("Unknown"));
+                    }
+                    if let Some(year) = obj.get("year") {
+                        println!("📅 Year: {}", year.as_u64().unwrap_or(0));
+                    }
+                    if let Some(url) = obj.get("url") {
+                        println!("🔗 URL: {}", url.as_str().unwrap_or("Not available"));
+                    }
+                    if let Some(relevance) = obj.get("relevance") {
+                        println!("🎯 Relevance: {}", relevance.as_str().unwrap_or("Not specified"));
+                    }
+                }
+            } else {
+                println!("{}", cell.content);
+            }
+        }
+    }
+    
+    // Display the main plan
+    println!("\n📝 PLAN:");
+    for cell in &other_cells {
         println!(
             "- [{}] {}",
             format!("{:?}", cell.cell_type).to_uppercase(),
             cell.content.trim()
         );
+    }
+    
+    // Add all cells to notebook
+    for cell in &plan_cells {
         notebook.add_cell(cell.clone());
     }
 

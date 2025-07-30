@@ -1,4 +1,4 @@
-use crate::cell::{NotebookCell, CellOrigin, CellType};
+use crate::cell::{NotebookCell, CellOrigin, CellType, ReferenceData};
 use crate::llm;
 use crate::storage;
 use crate::context::NotebookContext;
@@ -121,6 +121,10 @@ Steps:
         }
     }
 
+    // 📚 Generate relevant academic references
+    let references = generate_references_for_goal(goal, &parsed.steps).await?;
+    cells.extend(references);
+
     for step in parsed.steps {
         let desc_cell = NotebookCell::new(CellType::Plan, CellOrigin::Ai, &step.description);
         cells.push(desc_cell);
@@ -129,6 +133,64 @@ Steps:
             let code_cell = NotebookCell::new(CellType::Code, CellOrigin::Ai, &code);
             cells.push(code_cell);
         }
+    }
+
+    Ok(cells)
+}
+
+/// Generate relevant academic references for a research goal
+async fn generate_references_for_goal(
+    goal: &str,
+    steps: &[PlanStep],
+) -> Result<Vec<NotebookCell>, String> {
+    let step_descriptions: Vec<String> = steps.iter()
+        .map(|s| format!("- {}", s.description))
+        .collect();
+
+    let prompt = format!(
+        r#"Given this research goal and plan steps, suggest 3-5 relevant academic references, papers, or authoritative sources that would be helpful for this research.
+
+Research Goal: "{goal}"
+
+Plan Steps:
+{}
+
+Return ONLY a JSON array of reference objects. Each reference should include:
+- `title`: Full title of the paper/book/website
+- `authors`: Array of author names (if available)
+- `journal`: Journal name or publication venue (if applicable)
+- `year`: Publication year (if known)
+- `url`: URL to the source (if available)
+- `doi`: DOI identifier (if available)
+- `abstract`: Brief description or abstract (if available)
+- `relevance`: Why this reference is relevant to the research goal
+
+Example format:
+[
+  {{
+    "title": "Customer Churn Prediction Using Machine Learning",
+    "authors": ["Smith, J.", "Johnson, A."],
+    "journal": "Journal of Marketing Analytics",
+    "year": 2022,
+    "url": "https://example.com/paper",
+    "doi": "10.1000/example.doi",
+    "abstract": "This paper presents a comprehensive analysis of customer churn prediction...",
+    "relevance": "Directly addresses churn analysis methodology and provides relevant techniques for identifying churn factors"
+  }}
+]
+
+Focus on high-quality, peer-reviewed sources when possible. Include both recent papers and foundational works."#,
+        step_descriptions.join("\n")
+    );
+
+    let raw_json = llm::ask_llm(&prompt).await?;
+    let references: Vec<ReferenceData> = serde_json::from_str(&raw_json)
+        .map_err(|e| format!("Failed to parse references JSON: {e}\n---\n{}", raw_json))?;
+
+    let mut cells = vec![];
+    for reference in references {
+        let reference_cell = NotebookCell::new_reference(CellOrigin::Ai, &reference);
+        cells.push(reference_cell);
     }
 
     Ok(cells)
