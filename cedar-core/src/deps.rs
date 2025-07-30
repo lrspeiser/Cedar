@@ -20,6 +20,7 @@ fn install_package(pkg: &str) -> Result<(), String> {
         .arg("-m")
         .arg("pip")
         .arg("install")
+        .arg("--break-system-packages")
         .arg(pkg)
         .output()
         .map_err(|e| format!("Failed to run pip: {}", e))?;
@@ -27,7 +28,8 @@ fn install_package(pkg: &str) -> Result<(), String> {
     if output.status.success() {
         Ok(())
     } else {
-        Err(String::from_utf8_lossy(&output.stderr).to_string())
+        let error_msg = String::from_utf8_lossy(&output.stderr).to_string();
+        Err(format!("Failed to install {}: {}", pkg, error_msg))
     }
 }
 

@@ -18,7 +18,7 @@ pub async fn generate_plan_from_goal(goal: &str) -> Result<NotebookCell, String>
 /// Given a single plan step, ask the LLM to generate Python code for it.
 pub async fn generate_code_for_step(step_description: &str) -> Result<NotebookCell, String> {
     let prompt = format!(
-        "Write a clean Python code snippet to complete this task:\n\n\"{}\"\n\nDon't explain it—just output the code.",
+        "Write a clean Python code snippet to complete this task:\n\n\"{}\"\n\nIMPORTANT: Return ONLY the Python code without any markdown formatting, backticks, or explanations. Just the raw Python code that can be executed directly.",
         step_description
     );
 

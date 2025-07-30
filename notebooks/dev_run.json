@@ -1,0 +1,41 @@
+{
+  "title": "Churn by Region Analysis",
+  "cells": [
+    {
+      "id": "1",
+      "cell_type": "intent",
+      "origin": "user",
+      "content": "Show me which users are most likely to churn by region"
+    },
+    {
+      "id": "2",
+      "cell_type": "plan",
+      "origin": "ai",
+      "content": "1. Load customer dataset\n2. Filter to users with churn flag\n3. Group by region\n4. Count churn per region\n5. Plot results as bar chart"
+    },
+    {
+      "id": "3",
+      "cell_type": "code",
+      "origin": "ai",
+      "content": "import pandas as pd\nimport matplotlib.pyplot as plt\n\ndf = pd.read_csv('customers.csv')\nchurned = df[df['churn'] == True]\nregion_counts = churned['region'].value_counts()\nregion_counts.plot(kind='bar')\nplt.title('Churned Users by Region')\nplt.show()"
+    },
+    {
+      "id": "4",
+      "cell_type": "feedback",
+      "origin": "user",
+      "content": "Group Europe and UK together in the plot"
+    },
+    {
+      "id": "83d3b1e7-d2f2-4a49-8ef4-a53e44a794d5",
+      "cell_type": "plan",
+      "origin": "ai",
+      "content": "1. Import Necessary Libraries: Firstly, you need to import necessary libraries such as pandas, numpy, and sklearn. These libraries will help in data manipulation, numerical operations and machine learning respectively.\n\n```python\nimport pandas as pd\nimport numpy as np\nfrom sklearn.preprocessing import LabelEncoder\nfrom sklearn.ensemble import RandomForestClassifier\nfrom sklearn.model_selection import train_test_split\n```\n\n2. Load Data: Load your dataset using pandas. Assuming your dataset is in a CSV file:\n\n```python\ndf = pd.read_csv('your_file.csv')\n```\n\n3. Data Exploration: Check your data to understand what it looks like. You should check the first few rows, data types, missing values, and unique values of the 'churn' column:\n\n```python\ndf.head()\ndf.info()\ndf['churn'].value_counts()\n```\n\n4. Data Preprocessing: Clean your data by handling missing values. Also, encode categorical data if necessary using LabelEncoder:\n\n```python\ndf = df.fillna(method='ffill') # Forward fill for handling missing data\n\n# Encoding categorical features if necessary\nlabelencoder = LabelEncoder()\ndf['product_category'] = labelencoder.fit_transform(df['product_category'])\n```\n\n5. Feature Selection: Choose the 'churn' column as your target variable and the 'product_category' column as your feature. Split your data into feature and target sets:\n\n```python\nX = df.drop('churn', axis=1)\ny = df['churn']\n```\n\n6. Train/Test Split: Split your data into training and testing sets. This will help in validating the performance of your model:\n\n```python\nX_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)\n```\n\n7. Model Building: Use a RandomForestClassifier to build your model. This model helps in determining feature importance:\n\n```python\nmodel = RandomForestClassifier()\nmodel.fit(X_train, y_train)\n```\n\n8. Feature Importance: Check the importance of each feature. In this case, you want to understand the importance of 'product_category' in relation to 'churn':\n\n```python\nimportances = model.feature_importances_\nfeature_importances = pd.Series(importances, index=X.columns)\n```\n\n9. Top 3 Categories: Sort the feature_importances series in descending order and get the top 3 product categories associated with churn:\n\n```python\ntop_3_categories = feature_importances.nlargest(3)\nprint(top_3_categories)\n```\n\nPlease note that the code above assumes that 'product_category' is a feature in your dataset and 'churn' is your target variable. Adjust as necessary based on your actual dataset."
+    },
+    {
+      "id": "d29db4f6-33b0-46bd-97fe-0e496069fee7",
+      "cell_type": "code",
+      "origin": "ai",
+      "content": "import pandas as pd\nimport numpy as np\nfrom sklearn import *"
+    }
+  ]
+}

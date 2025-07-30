@@ -12,6 +12,9 @@ use cedar::{
 
 #[tokio::main]
 async fn main() -> Result<(), String> {
+    // Load environment variables from .env file
+    dotenv::dotenv().ok();
+    
     println!("🧠 Cedar CLI Dev Runner");
 
     // Ensure notebooks/ folder exists
