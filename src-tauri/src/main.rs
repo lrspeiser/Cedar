@@ -1,11 +1,11 @@
 // Prevents additional console window on Windows in release, DO NOT REMOVE!!
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
-use tauri::{Manager, State};
+use tauri::State;
 use serde::{Deserialize, Serialize};
 use std::sync::Mutex;
 use std::collections::HashMap;
-use cedar_core::{agent, cell, context, executor, llm, notebook, output_parser, deps};
+use cedar::{agent, cell, context, executor, output_parser, deps};
 
 // State to manage research sessions
 struct AppState {
@@ -100,7 +100,7 @@ async fn execute_code(
                 user_action_needed: "continue".to_string(),
             });
             
-            let result = serde_json::json!({
+            let result: serde_json::Value = serde_json::json!({
                 "output": formatted_output,
                 "validation": {
                     "isValid": validation.is_valid,
@@ -120,7 +120,7 @@ async fn execute_code(
                 match executor::run_python_code(&request.code) {
                     Ok(output) => {
                         let (_, formatted_output) = output_parser::parse_output(&output, false);
-                        Ok(serde_json::json!({
+                        let result: serde_json::Value = serde_json::json!({
                             "output": formatted_output,
                             "validation": {
                                 "isValid": true,
@@ -129,7 +129,8 @@ async fn execute_code(
                                 "suggestions": vec![format!("Auto-installed package: {}", package)],
                                 "nextStep": "Continue with analysis"
                             }
-                        }))
+                        });
+                        Ok(result)
                     }
                     Err(retry_error) => {
                         Err(format!("Failed to execute code after installing {}: {}", package, retry_error))
