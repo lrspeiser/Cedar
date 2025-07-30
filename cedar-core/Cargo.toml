@@ -11,6 +11,7 @@ regex = "1.7"
 reqwest = { version = "0.11", features = ["json", "rustls-tls"] }
 tokio = { version = "1", features = ["full"] }
 dotenv = "0.15"
+chrono = { version = "0.4", features = ["serde"] }
 
 [lib]
 name = "cedar"
@@ -31,3 +32,7 @@ path = "src/bin/research.rs"
 [[bin]]
 name = "test_session"
 path = "src/bin/test_session.rs"
+
+[[bin]]
+name = "test_publication"
+path = "src/bin/test_publication.rs"

@@ -6,9 +6,11 @@ use cedar::{
     executor,
     notebook::Notebook,
     output_parser,
+    publication,
 };
 
 use cedar::code_preprocessor;
+use chrono;
 
 use std::io::{self, Write};
 use std::path::Path;
@@ -273,6 +275,71 @@ async fn main() -> Result<(), String> {
     let filename = format!("notebooks/{}.json", slugify(goal));
     notebook.save_to_file(Path::new(&filename))?;
     println!("\n💾 Notebook saved to: {}\n", filename);
+
+    // 📄 Ask if user wants to publish results
+    println!("\n📄 PUBLICATION OPPORTUNITY");
+    println!("Your research session has been completed successfully!");
+    println!("Would you like to generate an academic paper from this research?");
+    println!("This will create a complete paper including:");
+    println!("  • Abstract and keywords");
+    println!("  • Introduction and methodology");
+    println!("  • Results and discussion");
+    println!("  • Conclusion and references");
+    println!("  • Both JSON and Markdown formats");
+    
+    print!("\n🤔 Generate academic paper? (y/n): ");
+    io::stdout().flush().unwrap();
+    let mut publish_response = String::new();
+    io::stdin().read_line(&mut publish_response).unwrap();
+    
+    if publish_response.trim().to_lowercase() == "y" {
+        println!("\n📝 Generating academic paper...");
+        
+        // Generate session ID from timestamp
+        let session_id = format!("session_{}", chrono::Utc::now().timestamp());
+        
+        match publication::generate_paper_from_session(
+            goal,
+            &session_id,
+            &notebook.cells,
+        ).await {
+            Ok(paper) => {
+                println!("✅ Paper generated successfully!");
+                println!("📊 Paper stats:");
+                println!("  • Title: {}", paper.title);
+                println!("  • Word count: {}", paper.metadata.word_count);
+                println!("  • References: {}", paper.references.len());
+                
+                // Save as JSON
+                let json_filename = format!("{}.json", slugify(&paper.title));
+                if let Err(e) = paper.save(&json_filename) {
+                    println!("⚠️  Failed to save JSON: {}", e);
+                } else {
+                    println!("💾 JSON saved to: papers/{}", json_filename);
+                }
+                
+                // Save as Markdown
+                let md_filename = format!("{}.md", slugify(&paper.title));
+                let papers_dir = Path::new("papers");
+                if !papers_dir.exists() {
+                    std::fs::create_dir_all(papers_dir).unwrap_or_default();
+                }
+                let md_path = papers_dir.join(&md_filename);
+                if let Err(e) = std::fs::write(&md_path, paper.to_markdown()) {
+                    println!("⚠️  Failed to save Markdown: {}", e);
+                } else {
+                    println!("💾 Markdown saved to: papers/{}", md_filename);
+                }
+                
+                println!("\n🎉 Publication complete! Your research is now ready for academic submission.");
+            }
+            Err(e) => {
+                println!("❌ Failed to generate paper: {}", e);
+            }
+        }
+    } else {
+        println!("📝 No problem! Your research notebook is saved and ready for future use.");
+    }
 
     Ok(())
 }

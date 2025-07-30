@@ -8,3 +8,4 @@ pub mod notebook;
 pub mod output_parser;
 pub mod code_preprocessor;
 pub mod storage;
+pub mod publication;
