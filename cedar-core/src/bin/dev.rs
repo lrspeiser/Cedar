@@ -3,6 +3,7 @@ use std::path::Path;
 
 use cedar::{
     agent,
+    context::NotebookContext,
     deps,
     executor,
     notebook::Notebook,
@@ -35,48 +36,64 @@ async fn main() -> Result<(), String> {
         }
     };
 
+    // Create context for the session
+    let mut context = NotebookContext::new();
+
     // 1. User's high-level goal
     let goal = "Find the top 3 product categories associated with churn";
     println!("\n🎯 Goal: {goal}");
-    let plan_cell = agent::generate_plan_from_goal(goal).await?;
-    println!("\n📝 Plan:\n{}", plan_cell.content);
-    notebook.add_cell(plan_cell.clone());
+    let plan_cells = agent::generate_plan_from_goal(goal, &mut context).await?;
+    println!("\n📝 Plan:");
+    for cell in &plan_cells {
+        println!("- [{}] {}", format!("{:?}", cell.cell_type).to_uppercase(), cell.content.trim());
+        notebook.add_cell(cell.clone());
+    }
 
-    // 2. Get first plan step
-    let step_lines: Vec<&str> = plan_cell
-        .content
-        .lines()
-        .filter_map(|line| line.split_once('.').map(|(_, s)| s.trim()))
-        .collect();
-
-    let first_step = step_lines.get(0).unwrap_or(&"Load data");
-    println!("\n🔧 Step 1: {first_step}");
-
-    let code_cell = agent::generate_code_for_step(first_step).await?;
-    println!("\n💻 Code:\n{}", code_cell.content);
-    notebook.add_cell(code_cell.clone());
-
-    // 3. Execute the code
-    match executor::run_python_code(&code_cell.content) {
-        Ok(stdout) => {
-            let (output_type, parsed) = output_parser::parse_output(&stdout, false);
-            println!("\n📊 Output ({output_type:?}):\n{parsed}");
+    // 2. Execute code cells
+    for (i, cell) in plan_cells.iter().enumerate() {
+        if cell.cell_type != cedar::cell::CellType::Code {
+            continue;
         }
-        Err(stderr) => {
-            println!("\n❌ Initial Python error:\n{stderr}");
 
-            if let Ok(Some(pkg)) = deps::auto_install_if_missing(&stderr) {
-                println!("✅ Retrying after installing: {pkg}");
-                let retry = executor::run_python_code(&code_cell.content)?;
-                let (output_type, parsed) = output_parser::parse_output(&retry, false);
-                println!("\n📊 Output after retry ({output_type:?}):\n{parsed}");
-            } else {
-                println!("🚫 Failed to recover from Python error.");
+        println!("\n🔧 Step {}: Executing code:", i + 1);
+        println!("{}", cell.content);
+
+        match executor::run_python_code(&cell.content) {
+            Ok(stdout) => {
+                let (output_type, parsed) = output_parser::parse_output(&stdout, false);
+                println!("\n📊 Output ({output_type:?}):\n{parsed}");
+                
+                let output_cell = cedar::cell::NotebookCell::new(
+                    cedar::cell::CellType::Output,
+                    cedar::cell::CellOrigin::User,
+                    &parsed
+                );
+                notebook.add_cell(output_cell);
+            }
+            Err(stderr) => {
+                println!("\n❌ Python error:\n{stderr}");
+
+                if let Ok(Some(pkg)) = deps::auto_install_if_missing(&stderr) {
+                    println!("✅ Retrying after installing: {pkg}");
+                    if let Ok(retry) = executor::run_python_code(&cell.content) {
+                        let (output_type, parsed) = output_parser::parse_output(&retry, false);
+                        println!("\n📊 Output after retry ({output_type:?}):\n{parsed}");
+                        
+                        let output_cell = cedar::cell::NotebookCell::new(
+                            cedar::cell::CellType::Output,
+                            cedar::cell::CellOrigin::User,
+                            &parsed
+                        );
+                        notebook.add_cell(output_cell);
+                    }
+                } else {
+                    println!("🚫 Failed to recover from Python error.");
+                }
             }
         }
     }
 
-    // 4. Save updated notebook
+    // 3. Save updated notebook
     let out_path = notebook_dir.join("dev_run.json");
     notebook.save_to_file(&out_path)?;
     println!("\n💾 Notebook saved to {}\n", out_path.display());

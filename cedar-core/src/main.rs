@@ -1,43 +1,12 @@
-// src/main.rs
-
-#![cfg_attr(
-    all(not(debug_assertions), target_os = "windows"),
-    windows_subsystem = "windows"
-)]
-
-mod agent;
-mod executor;
-mod llm;
-mod cell;
-mod deps;
-mod output_parser;
-
-use tauri::{Manager, State};
-use std::sync::Mutex;
-
-#[derive(Default)]
-struct AppState {
-    // Add shared app state here (e.g., notebook path, user config)
-    pub last_output: Mutex<Option<String>>,
-}
+// src/main.rs - Simple CLI entry point
 
 fn main() {
-    tauri::Builder::default()
-        .manage(AppState::default())
-        .invoke_handler(tauri::generate_handler![run_code_cell])
-        .run(tauri::generate_context!())
-        .expect("error while running Cedar");
-}
-
-/// Run a single Python code cell (basic version)
-#[tauri::command]
-fn run_code_cell(code: String, state: State<AppState>) -> Result<String, String> {
-    match executor::run_python_code(&code) {
-        Ok(output) => {
-            let mut last = state.last_output.lock().unwrap();
-            *last = Some(output.clone());
-            Ok(output)
-        }
-        Err(err) => Err(err),
-    }
+    println!("🧠 Cedar - AI-Powered Research Assistant");
+    println!();
+    println!("Available commands:");
+    println!("  cargo run -p cedar-core --bin dev      - Run development environment");
+    println!("  cargo run -p cedar-core --bin research - Interactive research assistant");
+    println!("  cargo run -p cedar-core --bin storage_test - Test storage functionality");
+    println!();
+    println!("For more information, see the README.md file.");
 }

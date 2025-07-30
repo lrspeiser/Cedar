@@ -1,0 +1,65 @@
+{
+  "title": "what is the length of a day on earth if we were 20% closer to the sun?",
+  "cells": [
+    {
+      "id": "eaf62c81-aab9-4761-a4b6-d5da24bd7af8",
+      "cell_type": "intent",
+      "origin": "user",
+      "content": "what is the length of a day on earth if we were 20% closer to the sun?"
+    },
+    {
+      "id": "65a78ce0-ca8b-4add-82e1-cb4b562fa1bb",
+      "cell_type": "plan",
+      "origin": "ai",
+      "content": "Define current distance from Earth to the Sun and Earth's rotation period"
+    },
+    {
+      "id": "e1a92f27-fe1b-4cee-a9f7-8e2ad836905b",
+      "cell_type": "plan",
+      "origin": "ai",
+      "content": "Compute the new distance from Earth to the Sun"
+    },
+    {
+      "id": "baed3276-9501-4eca-93f9-4117176f61f7",
+      "cell_type": "code",
+      "origin": "ai",
+      "content": "current_distance = 1.496 * (10**11)  \nnew_distance = current_distance * 0.8"
+    },
+    {
+      "id": "9eb30853-eb65-40b9-bb57-932689466e8d",
+      "cell_type": "plan",
+      "origin": "ai",
+      "content": "The length of a day on Earth is determined by its rotation, not its orbit around the sun. Therefore, moving the Earth closer to the Sun should not change the length of the day."
+    },
+    {
+      "id": "6c676ca7-e8c5-429b-b426-0cd208adcb2d",
+      "cell_type": "plan",
+      "origin": "ai",
+      "content": "Compute the length of a day on Earth"
+    },
+    {
+      "id": "f05bd32c-ec2d-402b-81d2-b348d84b2df7",
+      "cell_type": "code",
+      "origin": "ai",
+      "content": "length_of_day = 24"
+    },
+    {
+      "id": "fd9176f7-47b6-47b0-a4c3-fe845b98ce1a",
+      "cell_type": "plan",
+      "origin": "ai",
+      "content": "Conclude that the length of a day on Earth would not change if we were 20% closer to the Sun"
+    },
+    {
+      "id": "798012d8-b42b-4e65-a39f-2c5cb6d4f718",
+      "cell_type": "output",
+      "origin": "user",
+      "content": "119680000000.0"
+    },
+    {
+      "id": "def47346-f392-484a-a45c-8ba7366d3632",
+      "cell_type": "output",
+      "origin": "user",
+      "content": "119680000000.0\n24"
+    }
+  ]
+}

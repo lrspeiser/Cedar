@@ -1,35 +1,137 @@
-// src/agent.rs
-
-
+use crate::cell::{NotebookCell, CellOrigin, CellType};
 use crate::llm;
 use crate::storage;
+use crate::context::NotebookContext;
+use serde::Deserialize;
+use std::collections::HashMap;
 
-use crate::cell::{NotebookCell, CellOrigin, CellType};
+#[derive(Debug, Deserialize)]
+struct PlanBundle {
+    total_steps: usize,
+    steps: Vec<PlanStep>,
+}
 
-/// Given a user goal (natural language), ask the LLM to return a plan as a numbered list.
-/// Looks for known datasets and mentions them in the prompt
+#[derive(Debug, Deserialize)]
+struct PlanStep {
+    label: String,
+    description: String,
+    #[serde(default)]
+    code: Option<String>,
+}
 
-pub async fn generate_plan_from_goal(goal: &str) -> Result<NotebookCell, String> {
+/// Generate a structured multi-step plan from the user's research goal
+pub async fn generate_plan_from_goal(
+    goal: &str,
+    context: &mut NotebookContext,
+) -> Result<Vec<NotebookCell>, String> {
     let known = storage::list_known_datasets();
-
-    // Pass known dataset names into the LLM prompt
-    let known_datasets = if !known.is_empty() {
-        let names: Vec<String> = known.iter().map(|d| format!("- {}", d.name)).collect();
+    let known_hint = if !known.is_empty() {
+        let dataset_names: Vec<String> = known.iter().map(|d| format!("- {}", d.name)).collect();
         format!(
-            "\n\nNote: These datasets are already available locally:\n{}",
-            names.join("\n")
+            "\n\nNote: These datasets are already available:\n{}",
+            dataset_names.join("\n")
         )
     } else {
         "".to_string()
     };
 
+    let context_vars = context.variables.iter()
+        .map(|(k, v)| format!("{} = {}", k, v))
+        .collect::<Vec<_>>()
+        .join(", ");
+
+    let context_glossary = context.glossary.iter()
+        .map(|(k, v)| format!("- {}: {}", k, v))
+        .collect::<Vec<_>>()
+        .join("\n");
+
     let prompt = format!(
-        "You are a notebook assistant. Given the user goal:\n\"{}\"{}\n\nReturn a numbered list of plain English steps to complete this task using Python and pandas. Use available data where possible.",
-        goal, known_datasets
+        r#"You are an AI notebook assistant.
+
+Given the research goal:
+"{goal}"
+
+Known variables:
+{context_vars}
+
+Known glossary:
+{context_glossary}
+
+Return a JSON object with:
+- `total_steps`: number of plan steps
+- `steps`: list of steps (each with a label, description, optional code)
+
+Each step must include:
+- `label`: one of "python", "data", "plot", "discussion"
+- `description`: what the step does
+- optional `code`: Python code only for executable steps
+
+Do not explain your output. Return valid JSON only.
+
+Example:
+{{
+  "total_steps": 2,
+  "steps": [
+    {{
+      "label": "data",
+      "description": "Load dataset",
+      "code": "df = pd.read_csv('stars.csv')"
+    }},
+    {{
+      "label": "discussion",
+      "description": "Explain dataset contents"
+    }}
+  ]
+}}
+{known_hint}
+"#
     );
 
-    let plan_text = crate::llm::ask_llm(&prompt).await?;
-    Ok(NotebookCell::new(CellType::Plan, CellOrigin::Ai, &plan_text))
+    let raw_json = llm::ask_llm(&prompt).await?;
+    let parsed: PlanBundle = serde_json::from_str(&raw_json)
+        .map_err(|e| format!("Failed to parse LLM plan JSON: {e}\n---\n{}", raw_json))?;
+
+    let mut cells = vec![];
+
+    // 🧠 Ask the LLM if any glossary entries should be added
+    let glossary_prompt = format!(
+        r#"Given the following plan steps, list any important scientific concepts, equations, or named ideas that should be included in a glossary for future reference.
+
+Return ONLY a JSON object like:
+{{ "Kepler's Third Law": "Defines how orbital period relates to distance from the Sun", ... }}
+
+Steps:
+{}
+"#,
+        parsed
+            .steps
+            .iter()
+            .map(|s| format!("- {}", s.description))
+            .collect::<Vec<_>>()
+            .join("\n")
+    );
+
+    if let Ok(glossary_json) = llm::ask_llm(&glossary_prompt).await {
+        if let Ok(entries) = serde_json::from_str::<HashMap<String, String>>(&glossary_json) {
+            for (term, def) in entries {
+                if !context.has_term(&term) {
+                    context.set_glossary(&term, &def);
+                }
+            }
+        }
+    }
+
+    for step in parsed.steps {
+        let desc_cell = NotebookCell::new(CellType::Plan, CellOrigin::Ai, &step.description);
+        cells.push(desc_cell);
+
+        if let Some(code) = step.code {
+            let code_cell = NotebookCell::new(CellType::Code, CellOrigin::Ai, &code);
+            cells.push(code_cell);
+        }
+    }
+
+    Ok(cells)
 }
 
 /// Given a single plan step, ask the LLM to generate Python code for it.

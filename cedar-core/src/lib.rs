@@ -1,8 +1,10 @@
 pub mod agent;
 pub mod cell;
+pub mod context;
 pub mod deps;
 pub mod executor;
 pub mod llm;
 pub mod notebook;
 pub mod output_parser;
+pub mod code_preprocessor;
 pub mod storage;
