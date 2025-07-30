@@ -44,19 +44,29 @@ export interface SetApiKeyRequest {
 class ApiService {
   async setApiKey(apiKey: string): Promise<void> {
     try {
+      console.log('🔧 Calling Tauri backend: set_api_key', { 
+        apiKeyLength: apiKey.length, 
+        apiKeyPrefix: apiKey.substring(0, 10) + '...' 
+      })
+      
       await invoke('set_api_key', { request: { apiKey } })
+      
+      console.log('✅ Backend response: API key stored successfully')
     } catch (error) {
-      console.error('Error setting API key:', error)
+      console.error('❌ Backend error setting API key:', error)
       throw error
     }
   }
 
   async getApiKeyStatus(): Promise<boolean> {
     try {
+      console.log('🔧 Checking API key status from backend...')
       const response = await invoke('get_api_key_status')
-      return response as boolean
+      const hasApiKey = response as boolean
+      console.log('✅ Backend API key status:', hasApiKey ? 'API key found' : 'No API key found')
+      return hasApiKey
     } catch (error) {
-      console.error('Error getting API key status:', error)
+      console.error('❌ Backend error getting API key status:', error)
       throw error
     }
   }
@@ -67,7 +77,7 @@ class ApiService {
       return response as ResearchResponse
     } catch (error) {
       console.error('Error starting research:', error)
-      // Fallback to mock data if Tauri command fails
+      // Fallback to mock data if backend fails
       return this.getMockResearchResponse(request.goal)
     }
   }
@@ -78,7 +88,7 @@ class ApiService {
       return response as ExecuteCodeResponse
     } catch (error) {
       console.error('Error executing code:', error)
-      // Fallback to mock data if Tauri command fails
+      // Fallback to mock data if backend fails
       return this.getMockExecuteResponse(request.code)
     }
   }
@@ -86,6 +96,7 @@ class ApiService {
   async saveSession(sessionId: string, data: any): Promise<void> {
     try {
       await invoke('save_session', { sessionId, data })
+      console.log('Session saved successfully')
     } catch (error) {
       console.error('Error saving session:', error)
     }

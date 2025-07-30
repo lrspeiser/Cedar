@@ -4,6 +4,7 @@ import { Cell, ResearchSessionType } from '../App'
 import CellComponent from './CellComponent'
 import ReferencePanel from './ReferencePanel'
 import { cn } from '../lib/utils'
+import { apiService } from '../api'
 
 interface ResearchSessionProps {
   session: ResearchSessionType
@@ -42,38 +43,56 @@ const ResearchSession: React.FC<ResearchSessionProps> = ({ session, onUpdate }) 
       status: 'planning'
     })
 
-    // Simulate AI planning (in real app, this would call the Rust backend)
+    // Call the real API service
     setIsExecuting(true)
     
-    // Simulate planning delay
-    await new Promise(resolve => setTimeout(resolve, 2000))
-    
-    // Add plan cells
-    const planCells: Cell[] = [
-      {
-        id: (Date.now() + 1).toString(),
-        type: 'plan',
-        content: 'Load and examine the dataset',
-        timestamp: new Date()
-      },
-      {
-        id: (Date.now() + 2).toString(),
-        type: 'code',
-        content: 'import pandas as pd\n\ndf = pd.read_csv("data.csv")\nprint(df.head())',
-        timestamp: new Date()
-      },
-      {
-        id: (Date.now() + 3).toString(),
-        type: 'plan',
-        content: 'Analyze the data and identify patterns',
-        timestamp: new Date()
-      }
-    ]
-    
-    onUpdate({
-      cells: [...session.cells, intentCell, ...planCells],
-      status: 'executing'
-    })
+    try {
+      const response = await apiService.startResearch({
+        goal: goal,
+        sessionId: session.id
+      })
+      
+      // Convert API response cells to our format
+      const apiCells: Cell[] = response.cells.map(apiCell => ({
+        id: apiCell.id,
+        type: apiCell.type as any,
+        content: apiCell.content,
+        timestamp: new Date(apiCell.timestamp)
+      }))
+      
+      onUpdate({
+        cells: [...session.cells, intentCell, ...apiCells],
+        status: response.status as any
+      })
+    } catch (error) {
+      console.error('Error starting research:', error)
+      // Fallback to mock data if API fails
+      const planCells: Cell[] = [
+        {
+          id: (Date.now() + 1).toString(),
+          type: 'plan',
+          content: 'Load and examine the dataset',
+          timestamp: new Date()
+        },
+        {
+          id: (Date.now() + 2).toString(),
+          type: 'code',
+          content: 'import pandas as pd\n\ndf = pd.read_csv("data.csv")\nprint(df.head())',
+          timestamp: new Date()
+        },
+        {
+          id: (Date.now() + 3).toString(),
+          type: 'plan',
+          content: 'Analyze the data and identify patterns',
+          timestamp: new Date()
+        }
+      ]
+      
+      onUpdate({
+        cells: [...session.cells, intentCell, ...planCells],
+        status: 'executing'
+      })
+    }
     
     setIsExecuting(false)
   }
@@ -84,34 +103,63 @@ const ResearchSession: React.FC<ResearchSessionProps> = ({ session, onUpdate }) 
 
     setIsExecuting(true)
     
-    // Simulate code execution
-    await new Promise(resolve => setTimeout(resolve, 1500))
-    
-    // Add output cell
-    const outputCell: Cell = {
-      id: Date.now().toString(),
-      type: 'output',
-      content: '   col1  col2  col3\n0     1     2     3\n1     4     5     6\n2     7     8     9\n3    10    11    12\n4    13    14    15',
-      timestamp: new Date()
+    try {
+      const response = await apiService.executeCode({
+        code: cell.content,
+        sessionId: session.id
+      })
+      
+      // Add output cell
+      const outputCell: Cell = {
+        id: Date.now().toString(),
+        type: 'output',
+        content: response.output,
+        timestamp: new Date()
+      }
+      
+      // Add validation cell if validation data exists
+      const newCells: Cell[] = [outputCell]
+      
+      if (response.validation) {
+        const validationCell: Cell = {
+          id: (Date.now() + 1).toString(),
+          type: 'validation',
+          content: JSON.stringify(response.validation),
+          timestamp: new Date()
+        }
+        newCells.push(validationCell)
+      }
+      
+      onUpdate({
+        cells: [...session.cells, ...newCells]
+      })
+    } catch (error) {
+      console.error('Error executing code:', error)
+      // Fallback to mock output
+      const outputCell: Cell = {
+        id: Date.now().toString(),
+        type: 'output',
+        content: '   col1  col2  col3\n0     1     2     3\n1     4     5     6\n2     7     8     9\n3    10    11    12\n4    13    14    15',
+        timestamp: new Date()
+      }
+      
+      const validationCell: Cell = {
+        id: (Date.now() + 1).toString(),
+        type: 'validation',
+        content: JSON.stringify({
+          isValid: true,
+          confidence: 0.95,
+          issues: [],
+          suggestions: ['Consider adding data validation'],
+          nextStep: 'Proceed with analysis'
+        }),
+        timestamp: new Date()
+      }
+      
+      onUpdate({
+        cells: [...session.cells, outputCell, validationCell]
+      })
     }
-    
-    // Add validation cell
-    const validationCell: Cell = {
-      id: (Date.now() + 1).toString(),
-      type: 'validation',
-      content: JSON.stringify({
-        isValid: true,
-        confidence: 0.95,
-        issues: [],
-        suggestions: ['Consider adding data validation'],
-        nextStep: 'Proceed with analysis'
-      }),
-      timestamp: new Date()
-    }
-    
-    onUpdate({
-      cells: [...session.cells, outputCell, validationCell]
-    })
     
     setIsExecuting(false)
   }
