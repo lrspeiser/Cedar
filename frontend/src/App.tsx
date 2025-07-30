@@ -123,8 +123,14 @@ function App() {
                 type="password"
                 value={apiKey}
                 onChange={(e) => setApiKey(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && apiKey.trim() && !isSettingApiKey) {
+                    handleSetApiKey()
+                  }
+                }}
                 placeholder="sk-..."
                 className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-cedar-blue focus:border-transparent"
+                autoFocus
               />
             </div>
             

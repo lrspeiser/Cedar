@@ -1,6 +1,6 @@
 // API service for communicating with the Tauri backend
 
-import { invoke } from '@tauri-apps/api/tauri'
+import { invoke } from '@tauri-apps/api/core'
 
 export interface ResearchRequest {
   goal: string
