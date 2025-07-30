@@ -1,0 +1,107 @@
+{
+  "title": "Find the top 3 product categories associated with churn",
+  "cells": [
+    {
+      "id": "e913138f-e212-4e71-9275-01905261b9a9",
+      "cell_type": "intent",
+      "origin": "user",
+      "content": "Find the top 3 product categories associated with churn"
+    },
+    {
+      "id": "76dd890b-2341-4b8c-9fd3-aa71db6dc692",
+      "cell_type": "reference",
+      "origin": "ai",
+      "content": "{\n  \"title\": \"Predicting Customer Churn in Mobile Networks Through Analysis of Social Groups\",\n  \"authors\": [\n    \"Saraos Luna, L. A.\",\n    \"González, V. M.\"\n  ],\n  \"journal\": \"IEEE Systems Journal\",\n  \"year\": 2016,\n  \"url\": \"https://ieeexplore.ieee.org/document/7303987\",\n  \"doi\": \"10.1109/JSYST.2015.2486359\",\n  \"abstract\": \"This paper presents a new approach to churn prediction in mobile telecom by exploiting social network analysis techniques...\",\n  \"relevance\": \"Though the research is specific to mobile networks, the techniques and methodologies can be adapted for the analysis of churn in different product categories\"\n}",
+      "metadata": {
+        "reference_type": "academic"
+      }
+    },
+    {
+      "id": "2862a183-c176-4835-92e6-b5a4af3cab1c",
+      "cell_type": "reference",
+      "origin": "ai",
+      "content": "{\n  \"title\": \"Data Cleaning: Problems and Current Approaches\",\n  \"authors\": [\n    \"Rahm, E.\",\n    \"Do, H.H.\"\n  ],\n  \"journal\": \"IEEE Data Engineering Bulletin\",\n  \"year\": 2000,\n  \"url\": \"https://www.researchgate.net/publication/220242964_Data_Cleaning_Problems_and_Current_Approaches\",\n  \"doi\": null,\n  \"abstract\": \"This paper provides an overview of data cleaning problems and the current approaches to handle them...\",\n  \"relevance\": \"Provides insights on data cleaning strategies, which is crucial to the analysis of churned customers in each product category\"\n}",
+      "metadata": {
+        "reference_type": "academic"
+      }
+    },
+    {
+      "id": "e0f33fd9-d8d3-4979-abd1-3984294afd58",
+      "cell_type": "reference",
+      "origin": "ai",
+      "content": "{\n  \"title\": \"Customer churn prediction using improved balanced random forests\",\n  \"authors\": [\n    \"Xie, Y.\",\n    \"Li, X.\",\n    \"Ngai, E.W.T.\",\n    \"Ying, W.\"\n  ],\n  \"journal\": \"Expert Systems with Applications\",\n  \"year\": 2009,\n  \"url\": \"https://www.sciencedirect.com/science/article/pii/S0957417408001817\",\n  \"doi\": \"10.1016/j.eswa.2008.07.033\",\n  \"abstract\": \"Proposes a novel approach to handle the class imbalance problem in customer churn prediction, which can be adapted for product category churn analysis\",\n  \"relevance\": \"Highlights a novel approach to handle the class imbalance problem in customer churn prediction, which is relevant to identifying the top product categories associated with churn\"\n}",
+      "metadata": {
+        "reference_type": "academic"
+      }
+    },
+    {
+      "id": "00f5781b-2ecc-4dbc-9625-9cca3d1443c6",
+      "cell_type": "reference",
+      "origin": "ai",
+      "content": "{\n  \"title\": \"Churn Prediction in Subscription Services: An Application of Support Vector Machines While Comparing Two Parameter-Selection Techniques\",\n  \"authors\": [\n    \"Coussement, K.\",\n    \"Van den Poel, D.\"\n  ],\n  \"journal\": \"Expert Systems with Applications\",\n  \"year\": 2008,\n  \"url\": \"https://www.sciencedirect.com/science/article/abs/pii/S0957417407002930\",\n  \"doi\": \"10.1016/j.eswa.2007.08.009\",\n  \"abstract\": \"This paper demonstrates an application of Support Vector Machines (SVM) for predicting customer churn...\",\n  \"relevance\": \"Demonstrates advanced analytical techniques for predicting churn, which could be useful for determining product categories most associated with churn\"\n}",
+      "metadata": {
+        "reference_type": "academic"
+      }
+    },
+    {
+      "id": "a0219511-7251-455e-afed-24a04d58bd91",
+      "cell_type": "plan",
+      "origin": "ai",
+      "content": "Load the dataset"
+    },
+    {
+      "id": "946bdc7e-c447-48e0-8d9d-d93b83640ff4",
+      "cell_type": "code",
+      "origin": "ai",
+      "content": "df = pd.read_csv('churn_data.csv')"
+    },
+    {
+      "id": "ce6369b8-0689-4420-b67f-7af894e76296",
+      "cell_type": "plan",
+      "origin": "ai",
+      "content": "Clean up the data by removing null/missing values and handling outliers"
+    },
+    {
+      "id": "e64bfa17-134d-438a-b6b0-8dfcb7bf4d1e",
+      "cell_type": "code",
+      "origin": "ai",
+      "content": "df = df.dropna()\n# additional data cleaning steps may be required depending on the data"
+    },
+    {
+      "id": "c65a3133-264c-416e-963c-d027bafa4f63",
+      "cell_type": "plan",
+      "origin": "ai",
+      "content": "Create a subset of data containing only churned customers"
+    },
+    {
+      "id": "4f889364-1a73-48f8-b65b-df7cc06ad816",
+      "cell_type": "code",
+      "origin": "ai",
+      "content": "churned_customers_df = df[df['churn'] == 1]"
+    },
+    {
+      "id": "95661216-33b3-4a08-b684-2a05aba5f668",
+      "cell_type": "plan",
+      "origin": "ai",
+      "content": "Calculate the number of churned customers in each product category"
+    },
+    {
+      "id": "a43528ee-9ac9-4c29-b9a7-4f214356c21b",
+      "cell_type": "code",
+      "origin": "ai",
+      "content": "churn_by_product_category = churned_customers_df['product_category'].value_counts()"
+    },
+    {
+      "id": "4f055b78-8ec0-45ca-ad66-e7a9ee4214d4",
+      "cell_type": "plan",
+      "origin": "ai",
+      "content": "Identify the top 3 product categories associated with churn"
+    },
+    {
+      "id": "1e48c2d8-73cb-471c-8c3b-abdfbefd87f0",
+      "cell_type": "code",
+      "origin": "ai",
+      "content": "top_3_product_categories = churn_by_product_category.nlargest(3).index.tolist()"
+    }
+  ]
+}

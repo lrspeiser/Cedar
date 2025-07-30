@@ -26,64 +26,100 @@
       "content": "Group Europe and UK together in the plot"
     },
     {
-      "id": "738ed5eb-735b-4ee8-b317-b5e06e764127",
+      "id": "f8f90731-dd46-4a69-a634-5644b190bb16",
+      "cell_type": "reference",
+      "origin": "ai",
+      "content": "{\n  \"title\": \"Customer churn prediction in telecom using machine learning in big data platform\",\n  \"authors\": [\n    \"Dahiya, K.\",\n    \"Bhatia, S.\"\n  ],\n  \"journal\": \"Journal of Big Data\",\n  \"year\": 2018,\n  \"url\": \"https://journalofbigdata.springeropen.com/articles/10.1186/s40537-018-0120-7\",\n  \"doi\": \"10.1186/s40537-018-0120-7\",\n  \"abstract\": \"The study proposes a model for predicting customer churn and identifying the influencing factors through the application of machine learning techniques to big data.\",\n  \"relevance\": \"This paper provides a comprehensive analysis of customer churn prediction in telecom industry, which could be adapted to other industries. The methodologies could be used to identify the top product categories associated with churn.\"\n}",
+      "metadata": {
+        "reference_type": "academic"
+      }
+    },
+    {
+      "id": "aa384d50-24a2-472e-ae8e-3acf51c0e507",
+      "cell_type": "reference",
+      "origin": "ai",
+      "content": "{\n  \"title\": \"Understanding Customer Churn by Combinig and Visualizing Prediction Techniques\",\n  \"authors\": [\n    \"Verbeke, W.\",\n    \"Martens, D.\",\n    \"Mues, C.\"\n  ],\n  \"journal\": \"Expert Systems with Applications\",\n  \"year\": 2011,\n  \"url\": \"https://www.sciencedirect.com/science/article/pii/S0957417411000081\",\n  \"doi\": \"10.1016/j.eswa.2011.01.001\",\n  \"abstract\": \"A novel visualization technique is proposed in this study to understand customer churn. This could be used to understand the factors influencing churn.\",\n  \"relevance\": \"This paper discusses a visualization technique that might be useful in visually identifying product categories associated with churn.\"\n}",
+      "metadata": {
+        "reference_type": "academic"
+      }
+    },
+    {
+      "id": "ef81dfe4-c2e0-415a-98ff-650389dd90f9",
+      "cell_type": "reference",
+      "origin": "ai",
+      "content": "{\n  \"title\": \"Predicting customer churn in mobile telephony industry using probabilistic decision tree model\",\n  \"authors\": [\n    \"Singh, B.\",\n    \"Verma, H.K.\"\n  ],\n  \"journal\": \"Procedia Computer Science\",\n  \"year\": 2015,\n  \"url\": \"https://www.sciencedirect.com/science/article/pii/S1877050915015461\",\n  \"doi\": \"10.1016/j.procs.2015.07.495\",\n  \"abstract\": \"The paper provides a probabilistic decision tree model for predicting customer churn in the mobile telephony industry. It also identifies key behaviors that can indicate a high likelihood of customer churn.\",\n  \"relevance\": \"The paper's churn prediction model and identification of key behaviors related to churn can be adapted to identify product categories associated with high churn rates.\"\n}",
+      "metadata": {
+        "reference_type": "academic"
+      }
+    },
+    {
+      "id": "c8a24905-659d-432c-bf19-43c279f8ad8d",
+      "cell_type": "reference",
+      "origin": "ai",
+      "content": "{\n  \"title\": \"A multiple criteria approach to data mining\",\n  \"authors\": [\n    \"Mousseau, V.\",\n    \"Slowinski, R.\"\n  ],\n  \"journal\": \"European Journal of Operational Research\",\n  \"year\": 1998,\n  \"url\": \"https://www.sciencedirect.com/science/article/pii/S0377221797001413\",\n  \"doi\": \"10.1016/S0377-2217(97)00141-3\",\n  \"abstract\": \"The paper discusses multiple criteria decision making in data mining, which can be applied in diverse domains including customer churn analysis.\",\n  \"relevance\": \"The paper's approach to data mining could be very useful in processing the dataset and identifying the top 3 product categories associated with churn.\"\n}",
+      "metadata": {
+        "reference_type": "academic"
+      }
+    },
+    {
+      "id": "4d974ae5-9a54-49a4-81aa-48afb13f961a",
       "cell_type": "plan",
       "origin": "ai",
       "content": "Load the dataset"
     },
     {
-      "id": "1d050b80-0dca-4667-aa82-27d139dd7d48",
+      "id": "2c2c7329-b312-404f-9544-8d9d888ea336",
       "cell_type": "code",
       "origin": "ai",
-      "content": "df = pd.read_csv('churn_data.csv')"
+      "content": "import pandas as pd\n\ndf = pd.read_csv('churn_data.csv')"
     },
     {
-      "id": "9ef3520e-1d1b-4404-afbd-5fa7d61cb85b",
+      "id": "0bed2866-1d98-45c3-a0b0-99df1b831435",
       "cell_type": "plan",
       "origin": "ai",
-      "content": "Preprocess the data: check for null values, and if necessary, fill or drop them"
+      "content": "Preprocess the data, ensure the churn and product categories columns are properly formatted"
     },
     {
-      "id": "6a26a68f-f393-4ed5-9180-2e8be5769f76",
+      "id": "106a6da6-fa9e-4bda-b71d-4dbcdc05e0b1",
       "cell_type": "code",
       "origin": "ai",
-      "content": "df.isnull().sum(); df = df.dropna()"
+      "content": "df['Churn'] = df['Churn'].astype('category')\ndf['Product_Category'] = df['Product_Category'].astype('category')"
     },
     {
-      "id": "e4320dc0-afc5-4826-a275-a2712410415b",
+      "id": "a1b1a3ed-f990-454b-ae48-fa09d5924592",
       "cell_type": "plan",
       "origin": "ai",
-      "content": "Filter the dataframe to include only records where churn occurred"
+      "content": "Filter the data to include only the records where churn occurred"
     },
     {
-      "id": "6c783a5c-c2cc-4e75-9064-bffc248b4d82",
+      "id": "b7f08b67-f500-49d5-a365-d73012fe4fd3",
       "cell_type": "code",
       "origin": "ai",
-      "content": "churn_df = df[df['churn'] == 1]"
+      "content": "churn_data = df[df['Churn'] == 1]"
     },
     {
-      "id": "90f3cafa-b569-4d53-9bb8-5856b952bf06",
+      "id": "f7bf71a9-dcca-4c47-ac59-d9593f9a51da",
       "cell_type": "plan",
       "origin": "ai",
-      "content": "Count the frequency of each product category in the churn data"
+      "content": "Count the number of churn occurrences for each product category"
     },
     {
-      "id": "9ec71eb5-41f8-445b-98af-f00a01107e48",
+      "id": "d843e55a-21db-42a4-931a-e7ba12f21d1f",
       "cell_type": "code",
       "origin": "ai",
-      "content": "product_churn_counts = churn_df['product_category'].value_counts()"
+      "content": "churn_by_category = churn_data['Product_Category'].value_counts()"
     },
     {
-      "id": "f30b392d-5ee7-4746-beaa-e068ba70aca9",
+      "id": "42cf1ade-22e4-4a5d-80d1-5e1d59390b3c",
       "cell_type": "plan",
       "origin": "ai",
       "content": "Identify the top 3 product categories associated with churn"
     },
     {
-      "id": "70886718-9dbc-4cc9-964f-94b5c1365a1a",
+      "id": "24210f89-7cbe-433f-a2ac-f35b47238f46",
       "cell_type": "code",
       "origin": "ai",
-      "content": "top_3_product_churn = product_churn_counts.nlargest(3)"
+      "content": "top_3_churn_categories = churn_by_category.nlargest(3)\ntop_3_churn_categories"
     }
   ]
 }

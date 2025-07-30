@@ -1,8 +1,5 @@
-use std::io::{self, Write};
-use std::path::Path;
-
 use cedar::{
-    agent,
+    agent::{self, StepValidation},
     cell::{CellOrigin, CellType, NotebookCell},
     context::NotebookContext,
     deps,
@@ -12,6 +9,9 @@ use cedar::{
 };
 
 use cedar::code_preprocessor;
+
+use std::io::{self, Write};
+use std::path::Path;
 
 #[tokio::main]
 async fn main() -> Result<(), String> {
@@ -150,6 +150,83 @@ async fn main() -> Result<(), String> {
                     let output_cell =
                         NotebookCell::new(CellType::Output, CellOrigin::User, &formatted);
                     notebook.add_cell(output_cell);
+                    
+                    // 🔍 Validate the step output
+                    println!("\n🔍 Validating step output...");
+                    if let Ok(validation) = agent::validate_step_output(
+                        &cell.content,
+                        &cell.content,
+                        &formatted,
+                        goal,
+                        &extract_plan_steps(&plan_cells),
+                        i,
+                    ).await {
+                        display_validation_results(&validation);
+                        
+                        // Handle validation results
+                        match validation.user_action_needed.as_str() {
+                            "continue" => {
+                                println!("✅ Continuing to next step...");
+                            }
+                            "revise" => {
+                                println!("🔄 Revising code based on feedback...");
+                                if let Ok(improved_cell) = agent::generate_improved_code(
+                                    &cell.content,
+                                    &cell.content,
+                                    &validation,
+                                ).await {
+                                    println!("📝 Improved code:\n{}", improved_cell.content);
+                                    
+                                    // Ask user if they want to use the improved code
+                                    print!("\n🤔 Use improved code? (y/n): ");
+                                    io::stdout().flush().unwrap();
+                                    let mut response = String::new();
+                                    io::stdin().read_line(&mut response).unwrap();
+                                    
+                                    if response.trim().to_lowercase() == "y" {
+                                        println!("🔄 Replacing with improved code...");
+                                        // Replace the current cell with improved code
+                                        let improved_cell = NotebookCell::new(
+                                            CellType::Code,
+                                            CellOrigin::Ai,
+                                            &improved_cell.content
+                                        );
+                                        // Note: This would require more complex notebook manipulation
+                                        // For now, we'll just continue with the original
+                                        println!("⚠️  Code replacement not yet implemented - continuing with original");
+                                    }
+                                }
+                            }
+                            "restart" => {
+                                println!("🔄 Restarting analysis...");
+                                print!("\n🤔 Restart the entire analysis? (y/n): ");
+                                io::stdout().flush().unwrap();
+                                let mut response = String::new();
+                                io::stdin().read_line(&mut response).unwrap();
+                                
+                                if response.trim().to_lowercase() == "y" {
+                                    return Err("User requested restart".into());
+                                }
+                            }
+                            "ask_user" => {
+                                println!("❓ Manual intervention needed:");
+                                println!("{}", validation.next_step_recommendation);
+                                print!("\n🤔 Continue anyway? (y/n): ");
+                                io::stdout().flush().unwrap();
+                                let mut response = String::new();
+                                io::stdin().read_line(&mut response).unwrap();
+                                
+                                if response.trim().to_lowercase() != "y" {
+                                    return Err("User stopped execution".into());
+                                }
+                            }
+                            _ => {
+                                println!("⚠️  Unknown action: {}", validation.user_action_needed);
+                            }
+                        }
+                    } else {
+                        println!("⚠️  Could not validate step output");
+                    }
                 }
                 
                 // Update previous output for next iteration
@@ -205,4 +282,71 @@ fn slugify(name: &str) -> String {
         .chars()
         .map(|c| if c.is_alphanumeric() { c } else { '_' })
         .collect()
+}
+
+/// Extract plan steps from notebook cells for validation context
+fn extract_plan_steps(cells: &[NotebookCell]) -> Vec<agent::PlanStep> {
+    let mut steps = Vec::new();
+    let mut current_description = String::new();
+    
+    for cell in cells {
+        match cell.cell_type {
+            CellType::Plan => {
+                if !current_description.is_empty() {
+                    steps.push(agent::PlanStep {
+                        label: "plan".to_string(),
+                        description: current_description.clone(),
+                        code: None,
+                    });
+                }
+                current_description = cell.content.clone();
+            }
+            CellType::Code => {
+                if !current_description.is_empty() {
+                    steps.push(agent::PlanStep {
+                        label: "code".to_string(),
+                        description: current_description.clone(),
+                        code: Some(cell.content.clone()),
+                    });
+                    current_description.clear();
+                }
+            }
+            _ => {}
+        }
+    }
+    
+    // Add the last step if there's a description without code
+    if !current_description.is_empty() {
+        steps.push(agent::PlanStep {
+            label: "plan".to_string(),
+            description: current_description,
+            code: None,
+        });
+    }
+    
+    steps
+}
+
+/// Display validation results in a user-friendly format
+fn display_validation_results(validation: &StepValidation) {
+    println!("\n🔍 VALIDATION RESULTS:");
+    println!("Valid: {}", if validation.is_valid { "✅ Yes" } else { "❌ No" });
+    println!("Confidence: {:.1}%", validation.confidence * 100.0);
+    
+    if !validation.issues.is_empty() {
+        println!("\n⚠️  Issues found:");
+        for issue in &validation.issues {
+            println!("  • {}", issue);
+        }
+    }
+    
+    if !validation.suggestions.is_empty() {
+        println!("\n💡 Suggestions:");
+        for suggestion in &validation.suggestions {
+            println!("  • {}", suggestion);
+        }
+    }
+    
+    println!("\n🎯 Next step: {}", validation.next_step_recommendation);
+    println!("Action needed: {}", validation.user_action_needed);
 }

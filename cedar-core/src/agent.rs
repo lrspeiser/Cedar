@@ -6,17 +6,17 @@ use serde::Deserialize;
 use std::collections::HashMap;
 
 #[derive(Debug, Deserialize)]
-struct PlanBundle {
+pub struct PlanBundle {
     total_steps: usize,
     steps: Vec<PlanStep>,
 }
 
-#[derive(Debug, Deserialize)]
-struct PlanStep {
-    label: String,
-    description: String,
+#[derive(Debug, Deserialize, Clone)]
+pub struct PlanStep {
+    pub label: String,
+    pub description: String,
     #[serde(default)]
-    code: Option<String>,
+    pub code: Option<String>,
 }
 
 /// Generate a structured multi-step plan from the user's research goal
@@ -205,4 +205,107 @@ pub async fn generate_code_for_step(step_description: &str) -> Result<NotebookCe
 
     let code_text = llm::ask_llm(&prompt).await?;
     Ok(NotebookCell::new(CellType::Code, CellOrigin::Ai, &code_text))
+}
+
+/// Validate a step's output against the original plan and suggest improvements
+pub async fn validate_step_output(
+    step_description: &str,
+    step_code: &str,
+    step_output: &str,
+    original_goal: &str,
+    all_steps: &[PlanStep],
+    current_step_index: usize,
+) -> Result<StepValidation, String> {
+    let steps_context: Vec<String> = all_steps.iter()
+        .enumerate()
+        .map(|(i, step)| {
+            if i == current_step_index {
+                format!("[CURRENT] {}: {}", step.description, step_output)
+            } else {
+                format!("{}: {}", step.description, if step.code.is_some() { "[PENDING]" } else { "[NO CODE]" })
+            }
+        })
+        .collect();
+
+    let prompt = format!(
+        r#"You are an AI research assistant validating a step in a data analysis workflow.
+
+ORIGINAL RESEARCH GOAL: "{original_goal}"
+
+CURRENT STEP: "{step_description}"
+CODE EXECUTED: 
+{step_code}
+
+OUTPUT RECEIVED:
+{step_output}
+
+FULL WORKFLOW CONTEXT:
+{}
+
+Analyze this step's output and determine:
+
+1. Does the output make sense for this step?
+2. Does it align with the research goal?
+3. Are there any obvious issues (errors, unexpected results, missing data)?
+4. What should be the next logical step?
+
+Return ONLY a JSON object with this structure:
+{{
+  "is_valid": true/false,
+  "confidence": 0.0-1.0,
+  "issues": ["list of specific issues found"],
+  "suggestions": ["list of improvement suggestions"],
+  "next_step_recommendation": "what should happen next",
+  "user_action_needed": "continue|revise|restart|ask_user"
+}}
+
+Be specific and actionable in your analysis."#,
+        steps_context.join("\n")
+    );
+
+    let raw_json = llm::ask_llm(&prompt).await?;
+    let validation: StepValidation = serde_json::from_str(&raw_json)
+        .map_err(|e| format!("Failed to parse validation JSON: {e}\n---\n{}", raw_json))?;
+
+    Ok(validation)
+}
+
+/// Generate improved code for a step based on validation feedback
+pub async fn generate_improved_code(
+    step_description: &str,
+    original_code: &str,
+    validation_feedback: &StepValidation,
+) -> Result<NotebookCell, String> {
+    let issues_text = validation_feedback.issues.join("\n- ");
+    let suggestions_text = validation_feedback.suggestions.join("\n- ");
+
+    let prompt = format!(
+        r#"The previous code for this step had issues. Please generate improved code.
+
+STEP: "{step_description}"
+
+ORIGINAL CODE:
+{original_code}
+
+ISSUES FOUND:
+- {issues_text}
+
+SUGGESTIONS:
+- {suggestions_text}
+
+Generate improved Python code that addresses these issues. Return ONLY the Python code without any markdown formatting, backticks, or explanations."#
+    );
+
+    let improved_code = llm::ask_llm(&prompt).await?;
+    Ok(NotebookCell::new(CellType::Code, CellOrigin::Ai, &improved_code))
+}
+
+#[derive(Debug, Deserialize)]
+pub struct StepValidation {
+    pub is_valid: bool,
+    pub confidence: f64,
+    pub issues: Vec<String>,
+    pub suggestions: Vec<String>,
+    pub next_step_recommendation: String,
+    pub user_action_needed: String,
 }
