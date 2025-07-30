@@ -26,16 +26,64 @@
       "content": "Group Europe and UK together in the plot"
     },
     {
-      "id": "5e25cdf4-910f-43c6-945f-ca0e3f822d90",
+      "id": "738ed5eb-735b-4ee8-b317-b5e06e764127",
       "cell_type": "plan",
       "origin": "ai",
-      "content": "1. Import necessary libraries: \n   Start by importing necessary libraries like pandas for data manipulation, matplotlib and seaborn for data visualization, and sklearn for machine learning.\n\n   ```python\n   import pandas as pd\n   import numpy as np\n   import matplotlib.pyplot as plt\n   import seaborn as sns\n   from sklearn.preprocessing import LabelEncoder\n   ```\n\n2. Load your dataset: \n   You can load your dataset using Pandas. Let's assume your dataset is in CSV format.\n\n   ```python\n   df = pd.read_csv('your_file.csv')\n   ```\n\n3. Data Cleaning and Preparation:\n   Check your data for any missing or null values and handle them appropriately (either by removing those entries or filling them with a suitable value like mean, median, mode etc.). Also, ensure that your 'churn' and 'product category' columns are properly encoded (numerically for machine learning model). If not, use label encoding or one-hot encoding.\n\n   ```python\n   df = df.dropna() # dropping missing values\n   le = LabelEncoder()\n   df['Churn'] = le.fit_transform(df['Churn'])\n   df['Product Category'] = le.fit_transform(df['Product Category'])\n   ```\n\n4. Data Analysis:\n   Now you should analyze the data to find the top 3 product categories associated with churn. You can do this with a groupby operation to aggregate the churn rates per product category. Then, sort the categories by their churn rate in descending order and select the top three.\n\n   ```python\n   churn_by_category = df.groupby('Product Category')['Churn'].mean().sort_values(ascending=False)\n   top_3_categories = churn_by_category.head(3)\n   ```\n\n5. Print or visualize the results:\n   Finally, print the results or better still, visualize them using a bar plot to show the top 3 product categories associated with churn.\n\n   ```python\n   print(top_3_categories)\n\n   # Data visualization\n   plt.figure(figsize=(10,6))\n   sns.barplot(top_3_categories.index, top_3_categories.values, alpha=0.8)\n   plt.title('Top 3 Product Categories Associated with Churn')\n   plt.ylabel('Churn Rate', fontsize=12)\n   plt.xlabel('Product Category', fontsize=12)\n   plt.show()\n   ```\n\nRemember that these steps are a general guideline and might need to be adjusted based on the structure and specifics of your dataset."
+      "content": "Load the dataset"
     },
     {
-      "id": "da3009ce-ce5d-43a5-8ffc-f793c7554e22",
+      "id": "1d050b80-0dca-4667-aa82-27d139dd7d48",
       "cell_type": "code",
       "origin": "ai",
-      "content": "import numpy as np\nimport pandas as pd\nimport matplotlib.pyplot as plt\nimport seaborn as sns\nfrom sklearn.model_selection import train_test_split\nfrom sklearn.linear_model import LinearRegression\nfrom sklearn.metrics import mean_squared_error, r2_score"
+      "content": "df = pd.read_csv('churn_data.csv')"
+    },
+    {
+      "id": "9ef3520e-1d1b-4404-afbd-5fa7d61cb85b",
+      "cell_type": "plan",
+      "origin": "ai",
+      "content": "Preprocess the data: check for null values, and if necessary, fill or drop them"
+    },
+    {
+      "id": "6a26a68f-f393-4ed5-9180-2e8be5769f76",
+      "cell_type": "code",
+      "origin": "ai",
+      "content": "df.isnull().sum(); df = df.dropna()"
+    },
+    {
+      "id": "e4320dc0-afc5-4826-a275-a2712410415b",
+      "cell_type": "plan",
+      "origin": "ai",
+      "content": "Filter the dataframe to include only records where churn occurred"
+    },
+    {
+      "id": "6c783a5c-c2cc-4e75-9064-bffc248b4d82",
+      "cell_type": "code",
+      "origin": "ai",
+      "content": "churn_df = df[df['churn'] == 1]"
+    },
+    {
+      "id": "90f3cafa-b569-4d53-9bb8-5856b952bf06",
+      "cell_type": "plan",
+      "origin": "ai",
+      "content": "Count the frequency of each product category in the churn data"
+    },
+    {
+      "id": "9ec71eb5-41f8-445b-98af-f00a01107e48",
+      "cell_type": "code",
+      "origin": "ai",
+      "content": "product_churn_counts = churn_df['product_category'].value_counts()"
+    },
+    {
+      "id": "f30b392d-5ee7-4746-beaa-e068ba70aca9",
+      "cell_type": "plan",
+      "origin": "ai",
+      "content": "Identify the top 3 product categories associated with churn"
+    },
+    {
+      "id": "70886718-9dbc-4cc9-964f-94b5c1365a1a",
+      "cell_type": "code",
+      "origin": "ai",
+      "content": "top_3_product_churn = product_churn_counts.nlargest(3)"
     }
   ]
 }

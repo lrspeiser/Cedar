@@ -27,3 +27,7 @@ path = "src/bin/storage_test.rs"
 [[bin]]
 name = "research"
 path = "src/bin/research.rs"
+
+[[bin]]
+name = "test_session"
+path = "src/bin/test_session.rs"

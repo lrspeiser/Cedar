@@ -49,7 +49,10 @@ async fn main() -> Result<(), String> {
         notebook.add_cell(cell.clone());
     }
 
-    // 2. Execute code cells
+    // 2. Execute code cells with session management
+    let mut session_code = String::new();
+    let mut previous_output = String::new();
+    
     for (i, cell) in plan_cells.iter().enumerate() {
         if cell.cell_type != cedar::cell::CellType::Code {
             continue;
@@ -58,33 +61,62 @@ async fn main() -> Result<(), String> {
         println!("\n🔧 Step {}: Executing code:", i + 1);
         println!("{}", cell.content);
 
-        match executor::run_python_code(&cell.content) {
+        // Add this cell's code to the session
+        session_code.push_str(&cell.content);
+        session_code.push('\n');
+        
+        // Execute the full session to maintain state
+        match executor::run_python_code(&session_code) {
             Ok(stdout) => {
-                let (output_type, parsed) = output_parser::parse_output(&stdout, false);
-                println!("\n📊 Output ({output_type:?}):\n{parsed}");
+                // Extract only the new output by comparing with previous output
+                let new_output = if stdout.starts_with(&previous_output) {
+                    stdout[previous_output.len()..].trim()
+                } else {
+                    &stdout
+                };
                 
-                let output_cell = cedar::cell::NotebookCell::new(
-                    cedar::cell::CellType::Output,
-                    cedar::cell::CellOrigin::User,
-                    &parsed
-                );
-                notebook.add_cell(output_cell);
+                if !new_output.is_empty() {
+                    let (output_type, parsed) = output_parser::parse_output(new_output, false);
+                    println!("\n📊 Output ({output_type:?}):\n{parsed}");
+                    
+                    let output_cell = cedar::cell::NotebookCell::new(
+                        cedar::cell::CellType::Output,
+                        cedar::cell::CellOrigin::User,
+                        &parsed
+                    );
+                    notebook.add_cell(output_cell);
+                }
+                
+                // Update previous output for next iteration
+                previous_output = stdout;
             }
             Err(stderr) => {
                 println!("\n❌ Python error:\n{stderr}");
 
                 if let Ok(Some(pkg)) = deps::auto_install_if_missing(&stderr) {
                     println!("✅ Retrying after installing: {pkg}");
-                    if let Ok(retry) = executor::run_python_code(&cell.content) {
-                        let (output_type, parsed) = output_parser::parse_output(&retry, false);
-                        println!("\n📊 Output after retry ({output_type:?}):\n{parsed}");
+                    if let Ok(retry) = executor::run_python_code(&session_code) {
+                        // Extract only the new output
+                        let new_output = if retry.starts_with(&previous_output) {
+                            retry[previous_output.len()..].trim()
+                        } else {
+                            &retry
+                        };
                         
-                        let output_cell = cedar::cell::NotebookCell::new(
-                            cedar::cell::CellType::Output,
-                            cedar::cell::CellOrigin::User,
-                            &parsed
-                        );
-                        notebook.add_cell(output_cell);
+                        if !new_output.is_empty() {
+                            let (output_type, parsed) = output_parser::parse_output(new_output, false);
+                            println!("\n📊 Output after retry ({output_type:?}):\n{parsed}");
+                            
+                            let output_cell = cedar::cell::NotebookCell::new(
+                                cedar::cell::CellType::Output,
+                                cedar::cell::CellOrigin::User,
+                                &parsed
+                            );
+                            notebook.add_cell(output_cell);
+                        }
+                        
+                        // Update previous output
+                        previous_output = retry;
                     }
                 } else {
                     println!("🚫 Failed to recover from Python error.");

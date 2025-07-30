@@ -55,8 +55,9 @@ async fn main() -> Result<(), String> {
     }
 
     // 🔁 Future: persistent Python session (e.g. PyO3, WASM, or Jupyter)
-    // For now, simulate state by accumulating code
-    let mut cumulative_code = String::new();
+    // For now, maintain a session by accumulating code and tracking output differences
+    let mut session_code = String::new();
+    let mut previous_output = String::new();
 
     // Execute all code cells in order
     for (i, cell) in plan_cells.iter().enumerate() {
@@ -69,17 +70,32 @@ async fn main() -> Result<(), String> {
 
         // Preprocess cell to ensure final expression is visible
         let processed = code_preprocessor::preprocess(&cell.content);
-        cumulative_code.push_str(&processed);
-        cumulative_code.push('\n');
-
-        match executor::run_python_code(&cumulative_code) {
+        
+        // Add this cell's code to the session
+        session_code.push_str(&processed);
+        session_code.push('\n');
+        
+        // Execute the full session to maintain state
+        match executor::run_python_code(&session_code) {
             Ok(stdout) => {
-                let (output_type, formatted) = output_parser::parse_output(&stdout, false);
-                println!("\n📊 Output ({:?}):\n{}", output_type, formatted);
+                // Extract only the new output by comparing with previous output
+                let new_output = if stdout.starts_with(&previous_output) {
+                    stdout[previous_output.len()..].trim()
+                } else {
+                    &stdout
+                };
+                
+                if !new_output.is_empty() {
+                    let (output_type, formatted) = output_parser::parse_output(new_output, false);
+                    println!("\n📊 Output ({:?}):\n{}", output_type, formatted);
 
-                let output_cell =
-                    NotebookCell::new(CellType::Output, CellOrigin::User, &formatted);
-                notebook.add_cell(output_cell);
+                    let output_cell =
+                        NotebookCell::new(CellType::Output, CellOrigin::User, &formatted);
+                    notebook.add_cell(output_cell);
+                }
+                
+                // Update previous output for next iteration
+                previous_output = stdout;
                 
                 // Update context from executed code
                 context.update_from_code(&cell.content);
@@ -89,14 +105,26 @@ async fn main() -> Result<(), String> {
                 if let Ok(Some(pkg)) = deps::auto_install_if_missing(&stderr) {
                     println!("✅ Retrying after installing: {pkg}");
 
-                    if let Ok(retry_stdout) = executor::run_python_code(&cumulative_code) {
-                        let (output_type, formatted) =
-                            output_parser::parse_output(&retry_stdout, false);
-                        println!("\n📊 Output after retry ({:?}):\n{}", output_type, formatted);
+                    if let Ok(retry_stdout) = executor::run_python_code(&session_code) {
+                        // Extract only the new output
+                        let new_output = if retry_stdout.starts_with(&previous_output) {
+                            retry_stdout[previous_output.len()..].trim()
+                        } else {
+                            &retry_stdout
+                        };
+                        
+                        if !new_output.is_empty() {
+                            let (output_type, formatted) =
+                                output_parser::parse_output(new_output, false);
+                            println!("\n📊 Output after retry ({:?}):\n{}", output_type, formatted);
 
-                        let output_cell =
-                            NotebookCell::new(CellType::Output, CellOrigin::User, &formatted);
-                        notebook.add_cell(output_cell);
+                            let output_cell =
+                                NotebookCell::new(CellType::Output, CellOrigin::User, &formatted);
+                            notebook.add_cell(output_cell);
+                        }
+                        
+                        // Update previous output
+                        previous_output = retry_stdout;
                         
                         // Update context from executed code
                         context.update_from_code(&cell.content);
