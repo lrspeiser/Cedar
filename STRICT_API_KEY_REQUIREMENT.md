@@ -37,6 +37,20 @@ if !has_api_key {
 }
 ```
 
+### **Environment Variable Integration**
+
+The API key is automatically set as an environment variable for `cedar-core` functions:
+
+```rust
+// In set_api_key function
+std::env::set_var("OPENAI_API_KEY", &request.api_key);
+
+// In main function (when loading existing key)
+if let Some(ref key) = api_key {
+    std::env::set_var("OPENAI_API_KEY", key);
+}
+```
+
 ### **Functions Modified**
 - `start_research()`: Requires API key for research plan generation
 - `execute_code()`: Requires API key for real Python execution
@@ -72,6 +86,12 @@ console.log(status);
 testApiKeyRequirement();
 ```
 
+### **Test Environment Variable Fix**
+```javascript
+// In browser console
+testApiKeyEnvironmentVariable();
+```
+
 ### **Test Real Functionality**
 ```javascript
 // In browser console
@@ -103,8 +123,9 @@ When no API key is configured, Cedar returns clear error messages:
 - `frontend/src/api.ts`: Updated to handle new error responses
 
 ### **Test Scripts**
-- `frontend/test-placeholder-mode.js`: Renamed to `testApiKeyRequirement()`
-- `frontend/test-research.js`: Updated for new API key requirements
+- `frontend/test-placeholder-mode.js`: Updated to test API key requirement
+- `frontend/test-research.js`: Updated to handle new API key status format
+- `test-api-key-fix.js`: New test for environment variable fix
 
 ### **Documentation**
 - `API_KEY_SOLUTION.md`: Updated to reflect strict requirements

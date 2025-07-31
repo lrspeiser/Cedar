@@ -730,9 +730,12 @@ async fn set_api_key(
     save_api_key(&request.api_key)?;
     
     // Store the API key in memory
-    *state.api_key.lock().unwrap() = Some(request.api_key);
+    *state.api_key.lock().unwrap() = Some(request.api_key.clone());
     
-    println!("✅ Backend: API key stored successfully");
+    // Set the environment variable for cedar-core functions
+    std::env::set_var("OPENAI_API_KEY", &request.api_key);
+    
+    println!("✅ Backend: API key stored successfully and environment variable set");
     Ok(())
 }
 
@@ -2141,8 +2144,10 @@ fn main() {
         None
     });
     
-    if api_key.is_some() {
-        println!("🔑 API key loaded successfully");
+    if let Some(ref key) = api_key {
+        // Set the environment variable for cedar-core functions
+        std::env::set_var("OPENAI_API_KEY", key);
+        println!("🔑 API key loaded successfully and environment variable set");
     } else {
         println!("🔑 No API key found");
     }
