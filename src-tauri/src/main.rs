@@ -137,24 +137,36 @@ async fn execute_code(
     request: ExecuteCodeRequest,
     state: State<'_, AppState>,
 ) -> Result<serde_json::Value, String> {
+    println!("🔧 Backend: Starting code execution for session: {}", request.session_id);
+    println!("📝 Backend: Code to execute: {}", request.code);
+
     // Check if API key is set and clone it
     let api_key = {
         let api_key_guard = state.api_key.lock().unwrap();
         api_key_guard.clone()
     };
-    
+
     if api_key.is_none() {
+        println!("❌ Backend: No API key found for code execution");
         return Err("OpenAI API key not set. Please set your API key first.".to_string());
     }
-    
+
+    println!("✅ Backend: API key found, setting environment variable");
+
     // Set the API key as environment variable for this session
     std::env::set_var("OPENAI_API_KEY", api_key.as_ref().unwrap());
+    
+    println!("🐍 Backend: Calling executor::run_python_code");
     
     // Execute the Python code using your real executor
     match executor::run_python_code(&request.code) {
         Ok(output) => {
+            println!("✅ Backend: Python code executed successfully");
+            println!("📄 Backend: Raw output: {}", output);
+            
             // Parse the output
             let (_output_type, formatted_output) = output_parser::parse_output(&output, false);
+            println!("📝 Backend: Formatted output: {}", formatted_output);
             
             // Create validation using your AI system
             let validation = agent::validate_step_output(
@@ -187,8 +199,11 @@ async fn execute_code(
             Ok(result)
         }
         Err(error) => {
+            println!("❌ Backend: Python code execution failed: {}", error);
+            
             // Try to auto-install missing packages
             if let Ok(Some(package)) = deps::auto_install_if_missing(&error) {
+                println!("📦 Backend: Auto-installing package: {}", package);
                 // Retry execution after installing package
                 match executor::run_python_code(&request.code) {
                     Ok(output) => {

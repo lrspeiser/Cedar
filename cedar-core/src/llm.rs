@@ -58,10 +58,11 @@ async fn call_openai(prompt: &str, api_key: &str) -> Result<String, String> {
         .map_err(|e| format!("Request error: {}", e))?;
 
     // Check if the response is successful
-    if !res.status().is_success() {
+    let status = res.status();
+    if !status.is_success() {
         let error_text = res.text().await.unwrap_or_else(|_| "Unknown error".to_string());
-        println!("❌ LLM: API returned error status: {} - {}", res.status(), error_text);
-        return Err(format!("OpenAI API error ({}): {}", res.status(), error_text));
+        println!("❌ LLM: API returned error status: {} - {}", status, error_text);
+        return Err(format!("OpenAI API error ({}): {}", status, error_text));
     }
 
     let body: OpenAIResponse = res
