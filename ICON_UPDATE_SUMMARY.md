@@ -38,17 +38,14 @@ brew install imagemagick
 
 ### **Icon Creation Commands**
 ```bash
-# Convert brain.png to RGBA format
-magick brain.png -alpha set -background transparent brain_rgba.png
-
-# Create 32x32 icon
-magick brain_rgba.png -resize 32x32 32x32.png
+# Create macOS-style brain icon with smaller size and proper RGBA format
+magick brain.png -resize 800x800 -gravity center -extent 1024x1024 -alpha set -background transparent -alpha background -resize 32x32 -define png:color-type=6 32x32.png
 
 # Create 128x128 icon
-magick brain_rgba.png -resize 128x128 128x128.png
+magick brain.png -resize 800x800 -gravity center -extent 1024x1024 -alpha set -background transparent -alpha background -resize 128x128 -define png:color-type=6 128x128.png
 
 # Create 256x256 icon (for @2x)
-magick brain_rgba.png -resize 256x256 128x128@2x.png
+magick brain.png -resize 800x800 -gravity center -extent 1024x1024 -alpha set -background transparent -alpha background -resize 256x256 -define png:color-type=6 128x128@2x.png
 
 # Create macOS icon set
 mkdir brain.iconset
@@ -71,7 +68,8 @@ src-tauri/icons/
 ## 🎨 **Icon Specifications**
 
 ### **Brain Icon Features**
-- **Design**: Clean, modern brain icon
+- **Design**: Clean, modern brain icon with macOS-style rounded corners
+- **Style**: Smaller icon with curved corners (typical macOS app icon appearance)
 - **Colors**: Consistent with Cedar's brand
 - **Transparency**: Proper alpha channel support
 - **Scalability**: Vector-like quality at all sizes

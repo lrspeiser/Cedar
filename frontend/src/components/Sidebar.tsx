@@ -1,7 +1,17 @@
 import React from 'react'
 import { Plus, Trash2, FileText, Clock, CheckCircle, AlertCircle, Play } from 'lucide-react'
-import { ResearchSessionType } from '../App'
+// import { ResearchSessionType } from '../App'
 import { cn } from '../lib/utils'
+
+interface ResearchSessionType {
+  id: string;
+  name: string;
+  title: string;
+  goal: string;
+  status: 'pending' | 'running' | 'completed' | 'error' | 'executing' | 'planning';
+  createdAt: string;
+  updatedAt: string;
+}
 
 interface SidebarProps {
   sessions: ResearchSessionType[]

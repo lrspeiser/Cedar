@@ -31,7 +31,7 @@ const QuestionsTab: React.FC<QuestionsTabProps> = ({ projectId }) => {
     try {
       setLoading(true);
       const questionsData = await apiService.getQuestions(projectId);
-      setQuestions(questionsData);
+      setQuestions(questionsData as Question[]);
     } catch (error) {
       console.error('Failed to load questions:', error);
     } finally {
@@ -39,13 +39,14 @@ const QuestionsTab: React.FC<QuestionsTabProps> = ({ projectId }) => {
     }
   };
 
-  const handleGenerateQuestions = async (context: 'initial' | 'follow_up') => {
+  const handleGenerateQuestions = async (category?: string) => {
     try {
       setGenerating(true);
-      const newQuestions = await apiService.generateQuestions(projectId, context);
+      const newQuestions = await apiService.generateQuestions({ projectId, goal: "Research questions" });
       
       // Add the new questions to the project
-      for (const question of newQuestions) {
+      const questionsArray = newQuestions as any;
+      for (const question of questionsArray) {
         await apiService.addQuestion(projectId, question);
       }
       

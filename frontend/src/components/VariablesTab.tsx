@@ -37,7 +37,7 @@ const VariablesTab: React.FC<VariablesTabProps> = ({ projectId }) => {
     try {
       setLoading(true)
       const vars = await apiService.getVariables(projectId)
-      setVariables(vars)
+      setVariables(vars as VariableInfo[])
     } catch (error) {
       console.error('Failed to load variables:', error)
     } finally {

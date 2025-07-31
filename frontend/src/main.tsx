@@ -17,7 +17,7 @@ const setupLogging = () => {
       typeof arg === 'object' ? JSON.stringify(arg, null, 2) : String(arg)
     ).join(' ');
     
-    const logEntry = `[${timestamp}] [${level}] ${message}\n`;
+    // const logEntry = `[${timestamp}] [${level}] ${message}\n`;
     
     // Simple localStorage logging to avoid file download issues
     try {

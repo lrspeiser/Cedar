@@ -10,9 +10,13 @@ interface Project {
   created_at: string;
   updated_at: string;
   data_files: string[];
-  images: string[];
+  images: any[];
   references: any[];
   write_up: string;
+  variables: any[];
+  questions: any[];
+  libraries: any[];
+  researchAnswers?: Record<string, string>;
 }
 
 // Error Boundary Component
@@ -81,8 +85,8 @@ function App() {
       console.log('🔍 Checking API key status on app startup...');
       const hasApiKey = await apiService.getApiKeyStatus();
       console.log('✅ API key status check result:', hasApiKey ? 'API key found' : 'No API key found');
-      setApiKeySet(hasApiKey);
-      setShowApiKeySetup(!hasApiKey);
+      setApiKeySet(hasApiKey as boolean);
+      setShowApiKeySetup(!(hasApiKey as boolean));
       console.log('📋 No API key found, showing setup screen');
     } catch (error) {
       console.error('❌ Error checking API key status:', error);
@@ -122,9 +126,9 @@ function App() {
     setCurrentProject(project);
   };
 
-  const handleProjectUpdate = (updatedProject: Project) => {
-    setCurrentProject(updatedProject);
-  };
+  // const handleProjectUpdate = (updatedProject: Project) => {
+  //   setCurrentProject(updatedProject);
+  // };
 
   const handleBackToProjects = () => {
     setCurrentProject(null);

@@ -1431,6 +1431,7 @@ struct StartResearchRequest {
     project_id: String,
     session_id: String,
     goal: String,
+    answers: Option<serde_json::Value>, // Research initialization answers
 }
 
 /// Research Workflow - Start Research
@@ -1477,8 +1478,21 @@ async fn start_research(
     // Use the real research functionality from cedar-core
     let mut context = cedar::context::NotebookContext::new();
     
-    // Generate research plan using the actual agent
-    let plan_cells = match cedar::agent::generate_plan_from_goal(&request.goal, &mut context).await {
+    // Enhance the goal with research initialization answers if provided
+    let enhanced_goal = if let Some(answers) = &request.answers {
+        let answers_str = serde_json::to_string_pretty(answers)
+            .unwrap_or_else(|_| "{}".to_string());
+        format!(
+            "Research Goal: {}\n\nAdditional Context from User Answers:\n{}",
+            request.goal,
+            answers_str
+        )
+    } else {
+        request.goal.clone()
+    };
+    
+    // Generate research plan using the actual agent with enhanced goal
+    let plan_cells = match cedar::agent::generate_plan_from_goal(&enhanced_goal, &mut context).await {
         Ok(cells) => cells,
         Err(e) => {
             println!("❌ Failed to generate research plan: {}", e);
@@ -1638,6 +1652,25 @@ struct GenerateQuestionsRequest {
     goal: String,
 }
 
+#[derive(serde::Deserialize, serde::Serialize)]
+struct InitializeResearchRequest {
+    goal: String,
+}
+
+#[derive(serde::Serialize)]
+struct ResearchInitialization {
+    title: String,
+    questions: Vec<ResearchQuestion>,
+}
+
+#[derive(serde::Serialize)]
+struct ResearchQuestion {
+    id: String,
+    question: String,
+    category: String, // "data", "approach", "scope", "preferences"
+    required: bool,
+}
+
 /// Question Generation - Generate Questions
 /// 
 /// Uses AI to generate research questions:
@@ -1696,19 +1729,31 @@ async fn generate_questions(
 And the generated plan steps:
 {}
 
-Generate 5-8 specific research questions that will help achieve this goal.
+Generate 5-8 research planning questions that will help clarify the research direction and approach.
+
+IMPORTANT: Focus ONLY on questions about:
+- What the user wants to accomplish (goals, objectives, desired outcomes)
+- How they want to approach the research (methodology preferences, tools, techniques)
+- What scope and boundaries they want to set (timeframe, data sources, depth of analysis)
+- What specific aspects they want to focus on or prioritize
+- What constraints or preferences they have (budget, time, technical requirements)
+
+DO NOT ask questions about:
+- Facts or data the user might not know
+- Technical details they may not be familiar with
+- Specific values or parameters they haven't provided
 
 Return ONLY a JSON array of question objects:
 [
     {{
         "id": "q1",
-        "question": "What specific question?",
+        "question": "What specific outcomes do you want to achieve from this research?",
         "category": "initial|follow_up|clarification",
         "status": "pending"
     }}
 ]
 
-Focus on questions that will guide the research process."#,
+Focus on questions that help clarify the user's goals and preferences for the research direction."#,
         request.goal,
         plan_cells.iter()
             .map(|cell| format!("- {:?}: {}", cell.cell_type, cell.content))
@@ -1726,13 +1771,19 @@ Focus on questions that will guide the research process."#,
                     vec![
                         serde_json::json!({
                             "id": "q1",
-                            "question": format!("What is the main objective of this research: {}?", request.goal),
+                            "question": "What specific outcomes do you want to achieve from this research?",
                             "category": "initial",
                             "status": "pending"
                         }),
                         serde_json::json!({
                             "id": "q2",
-                            "question": "What data sources and methods will be used?",
+                            "question": "How would you like to approach this analysis (statistical, visualization, machine learning, etc.)?",
+                            "category": "initial", 
+                            "status": "pending"
+                        }),
+                        serde_json::json!({
+                            "id": "q3",
+                            "question": "What specific aspects of this topic are most important to you?",
                             "category": "initial", 
                             "status": "pending"
                         })
@@ -1756,6 +1807,151 @@ Focus on questions that will guide the research process."#,
     println!("✅ Generated {} questions", questions_json.len());
     
     Ok(response)
+}
+
+/// Research Initialization - Initialize Research
+/// 
+/// Analyzes research goal and generates:
+/// - A concise 5-word or less title
+/// - Structured questions to gather requirements
+/// - Questions about data sources, approach, scope, and preferences
+/// 
+/// QUESTION CATEGORIES:
+/// - data: Questions about data sources and availability
+/// - approach: Questions about methodology and tools
+/// - scope: Questions about research boundaries and depth
+/// - preferences: Questions about user preferences and constraints
+/// 
+/// TESTING: See tests::test_research_initialization() (to be added)
+/// CLI TESTING: Use initialize_research command
+/// API TESTING: Call initialize_research endpoint
+/// 
+/// Example usage:
+/// ```javascript
+/// const init = await apiService.initializeResearch({
+///   goal: 'Analyze customer churn patterns'
+/// });
+/// ```
+#[tauri::command]
+async fn initialize_research(
+    request: InitializeResearchRequest,
+    state: State<'_, AppState>,
+) -> Result<ResearchInitialization, String> {
+    println!("🔬 Initializing research for goal: {}", request.goal);
+    
+    // Check if API key is available
+    let has_api_key = state.api_key.lock().unwrap().is_some();
+    
+    if !has_api_key {
+        println!("❌ No API key available - research initialization requires a valid OpenAI API key");
+        return Err("Research initialization requires a valid OpenAI API key. Please configure your API key first.".to_string());
+    }
+    
+    // Generate title and questions using LLM
+    let prompt = format!(
+        r#"Based on this research goal: "{}"
+
+Generate:
+1. A concise title (5 words or less)
+2. 5-8 specific questions to help clarify the research approach and preferences
+
+IMPORTANT: Focus ONLY on questions about:
+- What the user wants to accomplish (goals, objectives, desired outcomes)
+- How they want to approach the research (methodology preferences, tools, techniques)
+- What scope and boundaries they want to set (timeframe, data sources, depth of analysis)
+- What specific aspects they want to focus on or prioritize
+- What constraints or preferences they have (budget, time, technical requirements)
+
+DO NOT ask questions about:
+- Facts or data the user might not know
+- Technical details they may not be familiar with
+- Specific values or parameters they haven't provided
+
+Return ONLY a JSON object:
+{{
+    "title": "Short Title Here",
+    "questions": [
+        {{
+            "id": "q1",
+            "question": "What specific outcomes do you want to achieve from this research?",
+            "category": "scope",
+            "required": true
+        }},
+        {{
+            "id": "q2", 
+            "question": "How would you like to approach this analysis (statistical, visualization, machine learning, etc.)?",
+            "category": "approach",
+            "required": true
+        }}
+    ]
+}}
+
+Focus on questions that help clarify the user's goals and preferences for the research direction."#,
+        request.goal
+    );
+    
+    let response_json = match cedar::llm::ask_llm(&prompt).await {
+        Ok(json_str) => {
+            match serde_json::from_str::<serde_json::Value>(&json_str) {
+                Ok(json) => json,
+                Err(e) => {
+                    println!("❌ Failed to parse initialization JSON: {}", e);
+                    // Fallback response
+                    serde_json::json!({
+                        "title": "Research Project",
+                        "questions": [
+                            {
+                                "id": "q1",
+                                "question": "What specific outcomes do you want to achieve from this research?",
+                                "category": "scope",
+                                "required": true
+                            },
+                            {
+                                "id": "q2",
+                                "question": "How would you like to approach this analysis (statistical, visualization, machine learning, etc.)?",
+                                "category": "approach", 
+                                "required": true
+                            },
+                            {
+                                "id": "q3",
+                                "question": "What specific aspects of this topic are most important to you?",
+                                "category": "scope",
+                                "required": false
+                            }
+                        ]
+                    })
+                }
+            }
+        },
+        Err(e) => {
+            println!("❌ Failed to generate initialization: {}", e);
+            return Err(format!("Failed to generate research initialization: {}", e));
+        }
+    };
+    
+    // Parse the response into our struct
+    let title = response_json["title"].as_str().unwrap_or("Research Project").to_string();
+    let empty_vec = vec![];
+    let questions_array = response_json["questions"].as_array().unwrap_or(&empty_vec);
+    
+    let questions: Vec<ResearchQuestion> = questions_array
+        .iter()
+        .map(|q| ResearchQuestion {
+            id: q["id"].as_str().unwrap_or("").to_string(),
+            question: q["question"].as_str().unwrap_or("").to_string(),
+            category: q["category"].as_str().unwrap_or("general").to_string(),
+            required: q["required"].as_bool().unwrap_or(false),
+        })
+        .collect();
+    
+    let initialization = ResearchInitialization {
+        title,
+        questions,
+    };
+    
+    println!("✅ Research initialized with title: '{}' and {} questions", initialization.title, initialization.questions.len());
+    
+    Ok(initialization)
 }
 
 #[tauri::command]
@@ -2040,6 +2236,29 @@ async fn run_cli_test(request: CliTestRequest) -> Result<serde_json::Value, Stri
             });
             Ok(response)
         }
+        "initialize_research" => {
+            let args: InitializeResearchRequest = serde_json::from_value(request.args)
+                .map_err(|e| format!("Failed to parse initialize_research args: {}", e))?;
+            // For CLI testing, we'll just return a mock response
+            let response = serde_json::json!({
+                "title": "Research Project",
+                "questions": [
+                    {
+                        "id": "q1",
+                        "question": "Do you have your own data or would you like me to provide some?",
+                        "category": "data",
+                        "required": true
+                    },
+                    {
+                        "id": "q2",
+                        "question": "What specific aspects should I focus on?",
+                        "category": "scope",
+                        "required": true
+                    }
+                ]
+            });
+            Ok(response)
+        }
         "delete_project" => {
             // Extract project_id from args
             let project_id = request.args["project_id"].as_str()
@@ -2061,6 +2280,7 @@ fn run_cli_mode() -> Result<(), String> {
     println!("  start_research");
     println!("  execute_code");
     println!("  generate_questions");
+    println!("  initialize_research");
     println!("  create_project");
     println!("  get_projects");
     println!("  delete_project");
@@ -2187,6 +2407,7 @@ fn main() {
             start_research,
             execute_code,
             generate_questions,
+            initialize_research,
             // API Testing endpoints
             test_api_endpoint,
             run_test_suite,

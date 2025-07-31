@@ -30,7 +30,7 @@ const LibrariesTab: React.FC<LibrariesTabProps> = ({ projectId }) => {
     try {
       setLoading(true);
       const librariesData = await apiService.getLibraries(projectId);
-      setLibraries(librariesData);
+      setLibraries(librariesData as Library[]);
     } catch (error) {
       console.error('Failed to load libraries:', error);
     } finally {
@@ -53,7 +53,10 @@ const LibrariesTab: React.FC<LibrariesTabProps> = ({ projectId }) => {
   const handleInstallAll = async () => {
     try {
       setInstalling('all');
-      await apiService.installAllLibraries(projectId);
+      // Install libraries one by one
+      for (const library of libraries) {
+        await apiService.installLibrary(projectId, library.name);
+      }
       await loadLibraries();
     } catch (error) {
       console.error('Failed to install all libraries:', error);

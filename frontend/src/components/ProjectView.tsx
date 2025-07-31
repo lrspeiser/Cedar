@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import { apiService } from '../api';
 import ResearchSession from './ResearchSession';
 import DataTab from './DataTab';
@@ -31,6 +31,7 @@ interface Project {
   questions: any[];
   libraries: any[];
   write_up: string;
+  researchAnswers?: Record<string, string>;
 }
 
 interface ProjectViewProps {
@@ -46,6 +47,7 @@ const ProjectView: React.FC<ProjectViewProps> = ({ project, onBack }) => {
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [deleteConfirmation, setDeleteConfirmation] = useState('');
   const [isDeleting, setIsDeleting] = useState(false);
+  const [researchAnswers, setResearchAnswers] = useState<Record<string, string> | undefined>(project.researchAnswers);
 
   const tabs = [
     { id: 'notebook', label: 'Notebook', icon: '📓' },
@@ -61,7 +63,7 @@ const ProjectView: React.FC<ProjectViewProps> = ({ project, onBack }) => {
   const refreshProjectData = async () => {
     try {
       const updatedProject = await apiService.getProject(project.id);
-      setProjectData(updatedProject);
+      setProjectData(updatedProject as Project);
     } catch (error) {
       console.error('Failed to refresh project data:', error);
     }
@@ -96,6 +98,7 @@ const ProjectView: React.FC<ProjectViewProps> = ({ project, onBack }) => {
             sessionId={`session_${Date.now()}`}
             projectId={project.id}
             goal={project.goal}
+            answers={researchAnswers}
             onContentGenerated={refreshProjectData}
           />
         );
@@ -116,7 +119,7 @@ const ProjectView: React.FC<ProjectViewProps> = ({ project, onBack }) => {
           <DataTab
             projectId={project.id}
             dataFiles={projectData.data_files}
-            onUpdate={refreshProjectData}
+            onDataFilesUpdate={(files) => console.log('Data files updated:', files)}
           />
         );
       case 'images':
@@ -132,7 +135,7 @@ const ProjectView: React.FC<ProjectViewProps> = ({ project, onBack }) => {
           <ReferencesTab
             projectId={project.id}
             references={projectData.references}
-            onUpdate={refreshProjectData}
+            onReferencesUpdate={(references) => console.log('References updated:', references)}
           />
         );
       case 'variables':
@@ -146,7 +149,7 @@ const ProjectView: React.FC<ProjectViewProps> = ({ project, onBack }) => {
           <WriteUpTab
             projectId={project.id}
             writeUp={projectData.write_up}
-            onUpdate={refreshProjectData}
+            onWriteUpUpdate={(writeUp) => console.log('Write up updated:', writeUp)}
           />
         );
       default:

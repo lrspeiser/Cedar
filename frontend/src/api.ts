@@ -196,7 +196,7 @@ class ApiService {
   async hasApiKey(): Promise<boolean> {
     try {
       const status = await this.getApiKeyStatus();
-      return status.has_key === true;
+      return (status as any).has_key === true;
     } catch (error) {
       console.error("❌ Error checking if API key exists:", error);
       return false;
@@ -549,14 +549,15 @@ class ApiService {
    * });
    * ```
    */
-  async startResearch(request: { projectId: string; sessionId: string; goal: string }) {
+  async startResearch(request: { projectId: string; sessionId: string; goal: string; answers?: Record<string, string> }) {
     console.log('🔧 Calling Tauri backend: start_research', request);
     try {
       // Convert frontend field names to backend field names
       const backendRequest = {
         project_id: request.projectId,
         session_id: request.sessionId,
-        goal: request.goal
+        goal: request.goal,
+        answers: request.answers || null
       };
       const result = await invoke('start_research', { request: backendRequest });
       console.log('✅ Backend research started successfully');
@@ -656,6 +657,31 @@ class ApiService {
       return result;
     } catch (error) {
       console.error('❌ Backend error generating questions:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Initialize Research - Generate title and questions
+   * 
+   * Analyzes research goal and generates:
+   * - A concise 5-word or less title
+   * - Structured questions to gather requirements
+   * 
+   * TESTING: Use in browser console with test-research.js
+   * 
+   * @param request - Research initialization request
+   * @returns ResearchInitialization with title and questions
+   */
+  async initializeResearch(request: { goal: string }) {
+    console.log('🔧 Calling Tauri backend: initialize_research', request);
+    
+    try {
+      const result = await invoke('initialize_research', { request });
+      console.log('✅ Backend research initialized successfully');
+      return result;
+    } catch (error) {
+      console.error('❌ Backend error initializing research:', error);
       throw error;
     }
   }

@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { apiService } from '../api';
+import { ResearchInitialization } from './ResearchInitialization';
 
 interface Project {
   id: string;
@@ -11,6 +12,7 @@ interface Project {
   images: string[];
   references: any[];
   write_up: string;
+  researchAnswers?: Record<string, string>;
 }
 
 interface ProjectManagerProps {
@@ -20,9 +22,7 @@ interface ProjectManagerProps {
 
 export const ProjectManager: React.FC<ProjectManagerProps> = ({ onProjectSelect, currentProject }) => {
   const [projects, setProjects] = useState<Project[]>([]);
-  const [showCreateForm, setShowCreateForm] = useState(false);
-  const [newProjectName, setNewProjectName] = useState('');
-  const [newProjectGoal, setNewProjectGoal] = useState('');
+  const [showResearchInit, setShowResearchInit] = useState(false);
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
@@ -41,26 +41,30 @@ export const ProjectManager: React.FC<ProjectManagerProps> = ({ onProjectSelect,
     }
   };
 
-  const createProject = async () => {
-    if (!newProjectName.trim() || !newProjectGoal.trim()) {
-      alert('Please enter both project name and goal');
-      return;
-    }
-
+  const handleResearchComplete = async (title: string, goal: string, answers: Record<string, string>) => {
     try {
       setLoading(true);
+      
+      // Create the project with the generated title
       const newProject = await apiService.createProject({
-        name: newProjectName,
-        goal: newProjectGoal,
+        name: title,
+        goal: goal,
       });
       
       setProjects(prev => [...prev, newProject as Project]);
-      setNewProjectName('');
-      setNewProjectGoal('');
-      setShowCreateForm(false);
+      setShowResearchInit(false);
+      
+      // Store the answers in the project for later use
+      const projectWithAnswers = {
+        ...(newProject as any),
+        researchAnswers: answers,
+        variables: [],
+        questions: [],
+        libraries: []
+      };
       
       // Auto-select the new project
-      onProjectSelect(newProject as Project);
+      onProjectSelect(projectWithAnswers as Project);
     } catch (error) {
       console.error('Failed to create project:', error);
       alert('Failed to create project');
@@ -78,58 +82,18 @@ export const ProjectManager: React.FC<ProjectManagerProps> = ({ onProjectSelect,
       <div className="flex justify-between items-center mb-6">
         <h2 className="text-2xl font-bold text-gray-800">Research Projects</h2>
         <button
-          onClick={() => setShowCreateForm(true)}
+          onClick={() => setShowResearchInit(true)}
           className="bg-cedar-500 text-white px-4 py-2 rounded-md hover:bg-cedar-600 transition-colors"
         >
           New Project
         </button>
       </div>
 
-      {showCreateForm && (
-        <div className="mb-6 p-4 bg-gray-50 rounded-lg">
-          <h3 className="text-lg font-semibold mb-4">Create New Project</h3>
-          <div className="space-y-4">
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">
-                Project Name
-              </label>
-              <input
-                type="text"
-                value={newProjectName}
-                onChange={(e) => setNewProjectName(e.target.value)}
-                className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-cedar-500"
-                placeholder="Enter project name"
-              />
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">
-                Research Goal
-              </label>
-              <textarea
-                value={newProjectGoal}
-                onChange={(e) => setNewProjectGoal(e.target.value)}
-                className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-cedar-500"
-                placeholder="Describe your research goal"
-                rows={3}
-              />
-            </div>
-            <div className="flex space-x-2">
-              <button
-                onClick={createProject}
-                disabled={loading}
-                className="bg-cedar-500 text-white px-4 py-2 rounded-md hover:bg-cedar-600 transition-colors disabled:opacity-50"
-              >
-                {loading ? 'Creating...' : 'Create Project'}
-              </button>
-              <button
-                onClick={() => setShowCreateForm(false)}
-                className="bg-gray-300 text-gray-700 px-4 py-2 rounded-md hover:bg-gray-400 transition-colors"
-              >
-                Cancel
-              </button>
-            </div>
-          </div>
-        </div>
+      {showResearchInit && (
+        <ResearchInitialization
+          onComplete={handleResearchComplete}
+          onCancel={() => setShowResearchInit(false)}
+        />
       )}
 
       {loading && projects.length === 0 ? (

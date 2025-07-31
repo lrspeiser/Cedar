@@ -49,6 +49,7 @@ interface ResearchSessionProps {
   sessionId: string;
   projectId: string;
   goal: string;
+  answers?: Record<string, string>;
   onContentGenerated?: () => void;
 }
 
@@ -56,6 +57,7 @@ const ResearchSession: React.FC<ResearchSessionProps> = ({
   sessionId, 
   projectId, 
   goal, 
+  answers,
   onContentGenerated 
 }) => {
   const [cells, setCells] = useState<Cell[]>([]);
@@ -88,8 +90,8 @@ const ResearchSession: React.FC<ResearchSessionProps> = ({
   const loadSession = async () => {
     try {
       const sessionData = await apiService.loadSession(sessionId);
-      if (sessionData && sessionData.cells) {
-        setCells(sessionData.cells);
+      if (sessionData && (sessionData as any).cells) {
+        setCells((sessionData as any).cells);
       }
     } catch (error) {
       console.error('Failed to load session:', error);
@@ -115,19 +117,21 @@ const ResearchSession: React.FC<ResearchSessionProps> = ({
       const response = await apiService.startResearch({
         projectId,
         sessionId,
-        goal: currentGoal.trim()
+        goal: currentGoal.trim(),
+        answers
       });
 
-      if (response.status === 'questions_generated' || response.status === 'questions_pending') {
+      const responseData = response as any;
+      if (responseData.status === 'questions_generated' || responseData.status === 'questions_pending') {
         // Show message to go to Questions tab
         setCells([{
           type: 'text',
-          content: `## Research Setup Required\n\n${response.message}\n\nPlease go to the **Questions** tab to answer the clarifying questions before research can begin.`,
+          content: `## Research Setup Required\n\n${responseData.message}\n\nPlease go to the **Questions** tab to answer the clarifying questions before research can begin.`,
           timestamp: new Date().toISOString()
         }]);
-      } else if (response.cells) {
+      } else if (responseData.cells) {
         // Research started and cells were generated
-        setCells(response.cells);
+        setCells(responseData.cells);
         
         // Start monitoring execution progress
         monitorExecutionProgress();
@@ -150,16 +154,17 @@ const ResearchSession: React.FC<ResearchSessionProps> = ({
       try {
         // Check if there are any new step results by looking at the session data
         const sessionData = await apiService.loadSession(sessionId);
-        if (sessionData && sessionData.step_results) {
+        const sessionDataAny = sessionData as any;
+        if (sessionData && sessionDataAny.step_results) {
           setExecutionProgress(prev => ({
             ...prev,
-            stepResults: sessionData.step_results || [],
-            currentStep: sessionData.step_results?.length || 0
+            stepResults: sessionDataAny.step_results || [],
+            currentStep: sessionDataAny.step_results?.length || 0
           }));
         }
         
         // Check if execution is complete
-        if (sessionData && sessionData.status === 'completed') {
+        if (sessionData && sessionDataAny.status === 'completed') {
           setExecutionProgress(prev => ({
             ...prev,
             isExecuting: false
@@ -171,14 +176,14 @@ const ResearchSession: React.FC<ResearchSessionProps> = ({
           if (onContentGenerated) {
             onContentGenerated();
           }
-        } else if (sessionData && (sessionData.status === 'completed_with_visualizations' || sessionData.status === 'completed_without_visualizations')) {
+        } else if (sessionData && (sessionDataAny.status === 'completed_with_visualizations' || sessionDataAny.status === 'completed_without_visualizations')) {
           // Research completed, check if visualizations were generated
-          if (sessionData.visualizations) {
+          if (sessionDataAny.visualizations) {
             setExecutionProgress(prev => ({
               ...prev,
               isExecuting: false,
               isGeneratingVisualizations: false,
-              totalVisualizations: sessionData.visualizations.length
+              totalVisualizations: sessionDataAny.visualizations.length
             }));
           } else {
             setExecutionProgress(prev => ({
@@ -194,7 +199,7 @@ const ResearchSession: React.FC<ResearchSessionProps> = ({
           if (onContentGenerated) {
             onContentGenerated();
           }
-        } else if (sessionData && (sessionData.status === 'completed_with_paper' || sessionData.status === 'completed_without_paper' || sessionData.status === 'completed_with_paper_no_viz' || sessionData.status === 'completed_without_extras')) {
+        } else if (sessionData && (sessionDataAny.status === 'completed_with_paper' || sessionDataAny.status === 'completed_without_paper' || sessionDataAny.status === 'completed_with_paper_no_viz' || sessionDataAny.status === 'completed_without_extras')) {
           // Research completed with paper update
           setExecutionProgress(prev => ({
             ...prev,
@@ -209,16 +214,16 @@ const ResearchSession: React.FC<ResearchSessionProps> = ({
           if (onContentGenerated) {
             onContentGenerated();
           }
-        } else if (sessionData && sessionData.status === 'generating_visualizations') {
+        } else if (sessionData && sessionDataAny.status === 'generating_visualizations') {
           // Visualization generation in progress
           setExecutionProgress(prev => ({
             ...prev,
             isExecuting: false,
             isGeneratingVisualizations: true,
-            visualizationProgress: sessionData.visualization_progress || 0,
-            totalVisualizations: sessionData.total_visualizations || 0
+            visualizationProgress: sessionDataAny.visualization_progress || 0,
+            totalVisualizations: sessionDataAny.total_visualizations || 0
           }));
-        } else if (sessionData && sessionData.status === 'updating_paper') {
+        } else if (sessionData && sessionDataAny.status === 'updating_paper') {
           // Paper update in progress
           setExecutionProgress(prev => ({
             ...prev,
@@ -250,13 +255,14 @@ const ResearchSession: React.FC<ResearchSessionProps> = ({
       });
 
       // Add the result as a new cell
+      const resultData = result as any;
       const newCell: Cell = {
         type: 'code',
         content: code,
         timestamp: new Date().toISOString(),
-        output: result.output,
-        validation: result.validation,
-        status: result.status
+        output: resultData.output,
+        validation: resultData.validation,
+        status: resultData.status
       };
 
       setCells(prev => [...prev, newCell]);
