@@ -116,7 +116,7 @@ class ApiService {
   async getProject(projectId: string) {
     console.log("🔧 Calling Tauri backend: get_project", { projectId });
     try {
-      const result = await invoke("get_project", { project_id: projectId });
+      const result = await invoke("get_project", { projectId });
       console.log("✅ Backend project retrieved successfully");
       return result;
     } catch (error) {
@@ -145,6 +145,42 @@ class ApiService {
       return result;
     } catch (error) {
       console.error("❌ Backend error adding reference:", error);
+      throw error;
+    }
+  }
+
+  async loadSession(sessionId: string) {
+    console.log("🔧 Calling Tauri backend: load_session", { sessionId });
+    try {
+      const result = await invoke("load_session", { sessionId });
+      console.log("✅ Backend session loaded successfully");
+      return result;
+    } catch (error) {
+      console.error("❌ Backend error loading session:", error);
+      throw error;
+    }
+  }
+
+  async saveSession(sessionId: string, data: any) {
+    console.log("🔧 Calling Tauri backend: save_session", { sessionId });
+    try {
+      const result = await invoke("save_session", { sessionId, data });
+      console.log("✅ Backend session saved successfully");
+      return result;
+    } catch (error) {
+      console.error("❌ Backend error saving session:", error);
+      throw error;
+    }
+  }
+
+  async updateSession(sessionId: string, cells: any[]) {
+    console.log("🔧 Calling Tauri backend: update_session", { sessionId, cellCount: cells.length });
+    try {
+      const result = await invoke("update_session", { sessionId, cells });
+      console.log("✅ Backend session updated successfully");
+      return result;
+    } catch (error) {
+      console.error("❌ Backend error updating session:", error);
       throw error;
     }
   }

@@ -150,6 +150,235 @@ fn load_projects() -> Result<HashMap<String, Project>, String> {
     Ok(projects)
 }
 
+fn get_sessions_dir() -> PathBuf {
+    get_app_data_dir().join("sessions")
+}
+
+fn save_session_to_disk(session_id: &str, data: &serde_json::Value) -> Result<(), String> {
+    let sessions_dir = get_sessions_dir();
+    if !sessions_dir.exists() {
+        fs::create_dir_all(&sessions_dir)
+            .map_err(|e| format!("Failed to create sessions directory: {}", e))?;
+    }
+    
+    let session_file = sessions_dir.join(format!("{}.json", session_id));
+    let json = serde_json::to_string_pretty(data)
+        .map_err(|e| format!("Failed to serialize session: {}", e))?;
+    
+    fs::write(session_file, json)
+        .map_err(|e| format!("Failed to save session: {}", e))
+}
+
+fn load_session_from_disk(session_id: &str) -> Result<Option<serde_json::Value>, String> {
+    let sessions_dir = get_sessions_dir();
+    let session_file = sessions_dir.join(format!("{}.json", session_id));
+    
+    if !session_file.exists() {
+        return Ok(None);
+    }
+    
+    let content = fs::read_to_string(session_file)
+        .map_err(|e| format!("Failed to read session file: {}", e))?;
+    
+    let session: serde_json::Value = serde_json::from_str(&content)
+        .map_err(|e| format!("Failed to parse session: {}", e))?;
+    
+    Ok(Some(session))
+}
+
+/// Helper function to save file without being a Tauri command
+async fn save_file_helper(
+    request: SaveFileRequest,
+    state: &State<'_, AppState>,
+) -> Result<(), String> {
+    println!("💾 Backend: Saving file: {} to project: {}", request.filename, request.project_id);
+    
+    // Get project from state
+    let mut projects_guard = state.projects.lock().unwrap();
+    let project = projects_guard.get_mut(&request.project_id)
+        .ok_or_else(|| format!("Project not found: {}", request.project_id))?;
+    
+    // Update project based on file type
+    match request.file_type.as_str() {
+        "data" => {
+            if !project.data_files.contains(&request.filename) {
+                project.data_files.push(request.filename.clone());
+            }
+        },
+        "image" => {
+            if !project.images.contains(&request.filename) {
+                project.images.push(request.filename.clone());
+            }
+        },
+        "write_up" => {
+            project.write_up = request.content.clone();
+        },
+        _ => {}
+    }
+    
+    // Save project to file
+    save_project(project)?;
+    
+    // Save file content to disk
+    let project_dir = get_project_dir(&request.project_id);
+    let file_path = project_dir.join(&request.filename);
+    
+    fs::write(file_path, request.content)
+        .map_err(|e| format!("Failed to save file: {}", e))?;
+    
+    println!("✅ Backend: File saved successfully");
+    Ok(())
+}
+
+/// Helper function to add reference without being a Tauri command
+async fn add_reference_helper(
+    project_id: String,
+    reference: Reference,
+    state: &State<'_, AppState>,
+) -> Result<(), String> {
+    println!("📚 Backend: Adding reference to project: {}", project_id);
+    
+    // Get project from state
+    let mut projects_guard = state.projects.lock().unwrap();
+    let project = projects_guard.get_mut(&project_id)
+        .ok_or_else(|| format!("Project not found: {}", project_id))?;
+    
+    // Add reference to project
+    project.references.push(reference.clone());
+    
+    // Save project to file
+    save_project(project)?;
+    
+    println!("✅ Backend: Reference added successfully");
+    Ok(())
+}
+
+/// Automatically categorize code execution output into project tabs
+async fn categorize_code_output(
+    code: &str,
+    output: &str,
+    project_id: &str,
+    state: &State<'_, AppState>,
+) -> Result<(), String> {
+    println!("🔍 Backend: Categorizing code output into project tabs");
+    
+    // Check if code generates data files
+    if code.contains("pd.read_csv") || code.contains("pd.read_excel") || 
+       code.contains("save") || code.contains("to_csv") || code.contains("DataFrame") {
+        let data_content = format!("Code Output:\n\n```python\n{}\n```\n\nOutput:\n{}\n", code, output);
+        save_file_helper(SaveFileRequest {
+            project_id: project_id.to_string(),
+            filename: format!("data_output_{}.txt", chrono::Utc::now().timestamp()),
+            content: data_content,
+            file_type: "data".to_string(),
+        }, state).await?;
+        println!("📊 Backend: Added data output to project");
+    }
+    
+    // Check if code generates images
+    if code.contains("plt.savefig") || code.contains("matplotlib") || 
+       code.contains("seaborn") || code.contains("plot") || code.contains("figure") {
+        let image_content = format!("Image Generation Code:\n\n```python\n{}\n```\n\nOutput:\n{}\n", code, output);
+        save_file_helper(SaveFileRequest {
+            project_id: project_id.to_string(),
+            filename: format!("image_output_{}.txt", chrono::Utc::now().timestamp()),
+            content: image_content,
+            file_type: "image".to_string(),
+        }, state).await?;
+        println!("🖼️ Backend: Added image output to project");
+    }
+    
+    // Check if output contains significant findings for write-up
+    if output.len() > 100 && (output.contains("mean") || output.contains("result") || 
+                              output.contains("analysis") || output.contains("finding")) {
+        let write_up_content = format!("Code Execution Results:\n\n```python\n{}\n```\n\nFindings:\n{}\n\n---\n", code, output);
+        save_file_helper(SaveFileRequest {
+            project_id: project_id.to_string(),
+            filename: "code_findings.txt".to_string(),
+            content: write_up_content,
+            file_type: "write_up".to_string(),
+        }, state).await?;
+        println!("📝 Backend: Added code findings to write-up");
+    }
+    
+    Ok(())
+}
+
+/// Automatically categorize AI-generated content into project tabs
+async fn categorize_content_to_tabs(
+    cells: &[cell::NotebookCell],
+    project_id: &str,
+    state: &State<'_, AppState>,
+) -> Result<(), String> {
+    println!("🔍 Backend: Categorizing content into project tabs");
+    
+    for cell in cells {
+        match cell.cell_type {
+            cell::CellType::Reference => {
+                // Extract reference data and add to References tab
+                if let Ok(reference_data) = serde_json::from_str::<cell::ReferenceData>(&cell.content) {
+                    let reference = Reference {
+                        id: cell.id.clone(),
+                        title: reference_data.title,
+                        authors: reference_data.authors.unwrap_or_default().join(", "),
+                        url: reference_data.url,
+                        content: reference_data.relevance.unwrap_or_default(),
+                        added_at: chrono::Utc::now().to_rfc3339(),
+                    };
+                    
+                    add_reference_helper(project_id.to_string(), reference.clone(), state).await?;
+                    println!("📚 Backend: Added reference to project: {}", reference.title);
+                }
+            },
+            cell::CellType::Code => {
+                // Check if code generates data files or images
+                if cell.content.contains("pd.read_csv") || cell.content.contains("pd.read_excel") || 
+                   cell.content.contains("save") || cell.content.contains("to_csv") {
+                    // This might generate data files
+                    let data_content = format!("Code that may generate data:\n\n```python\n{}\n```", cell.content);
+                    save_file_helper(SaveFileRequest {
+                        project_id: project_id.to_string(),
+                        filename: format!("data_from_code_{}.txt", cell.id),
+                        content: data_content,
+                        file_type: "data".to_string(),
+                    }, state).await?;
+                    println!("📊 Backend: Added potential data file to project");
+                }
+                
+                if cell.content.contains("plt.savefig") || cell.content.contains("matplotlib") || 
+                   cell.content.contains("seaborn") || cell.content.contains("plot") {
+                    // This might generate images
+                    let image_content = format!("Code that may generate images:\n\n```python\n{}\n```", cell.content);
+                    save_file_helper(SaveFileRequest {
+                        project_id: project_id.to_string(),
+                        filename: format!("image_code_{}.txt", cell.id),
+                        content: image_content,
+                        file_type: "image".to_string(),
+                    }, state).await?;
+                    println!("🖼️ Backend: Added potential image code to project");
+                }
+            },
+            cell::CellType::Output => {
+                // Check if output contains data or insights for write-up
+                if cell.content.len() > 100 {
+                    // This might be significant output worth adding to write-up
+                    let write_up_content = format!("Research Output:\n\n{}\n\n---\n", cell.content);
+                    save_file_helper(SaveFileRequest {
+                        project_id: project_id.to_string(),
+                        filename: "research_findings.txt".to_string(),
+                        content: write_up_content,
+                        file_type: "write_up".to_string(),
+                    }, state).await?;
+                    println!("📝 Backend: Added research output to write-up");
+                }
+            },
+            _ => {}
+        }
+    }
+    
+    Ok(())
+}
+
 #[tauri::command]
 async fn set_api_key(
     request: SetApiKeyRequest,
@@ -218,6 +447,14 @@ async fn start_research(
         }
     };
     
+    // If we have a project_id, automatically categorize content into tabs
+    if let Some(project_id) = &request.project_id {
+        if let Err(e) = categorize_content_to_tabs(&cells, project_id, &state).await {
+            println!("⚠️ Backend: Warning - failed to categorize content: {}", e);
+            // Don't fail the entire request, just log the warning
+        }
+    }
+    
     println!("🔄 Backend: Converting cells to JSON format");
     
     // Convert cells to JSON format for the frontend
@@ -247,8 +484,11 @@ async fn start_research(
         "cells": cells_json
     });
     
-    // Store session in state
+    // Store session in state and save to disk
     state.sessions.lock().unwrap().insert(session_id.clone(), response.clone());
+    if let Err(e) = save_session_to_disk(&session_id, &response) {
+        println!("⚠️ Backend: Warning - failed to save session to disk: {}", e);
+    }
     
     println!("✅ Backend: Research started successfully");
     
@@ -308,6 +548,12 @@ async fn execute_code(
                 user_action_needed: "continue".to_string(),
             });
             
+            // Categorize the output content into project tabs
+            if let Err(e) = categorize_code_output(&request.code, &formatted_output, &request.project_id, &state).await {
+                println!("⚠️ Backend: Warning - failed to categorize code output: {}", e);
+                // Don't fail the entire request, just log the warning
+            }
+            
             let result: serde_json::Value = serde_json::json!({
                 "output": formatted_output,
                 "validation": {
@@ -360,7 +606,13 @@ async fn save_session(
     data: serde_json::Value,
     state: State<'_, AppState>,
 ) -> Result<(), String> {
-    state.sessions.lock().unwrap().insert(session_id, data);
+    // Save to memory
+    state.sessions.lock().unwrap().insert(session_id.clone(), data.clone());
+    
+    // Save to disk
+    save_session_to_disk(&session_id, &data)?;
+    
+    println!("💾 Backend: Session saved to disk: {}", session_id);
     Ok(())
 }
 
@@ -369,8 +621,23 @@ async fn load_session(
     session_id: String,
     state: State<'_, AppState>,
 ) -> Result<Option<serde_json::Value>, String> {
-    let sessions = state.sessions.lock().unwrap();
-    Ok(sessions.get(&session_id).cloned())
+    // First try to load from memory
+    {
+        let sessions = state.sessions.lock().unwrap();
+        if let Some(session) = sessions.get(&session_id) {
+            return Ok(Some(session.clone()));
+        }
+    }
+    
+    // If not in memory, try to load from disk
+    if let Some(session) = load_session_from_disk(&session_id)? {
+        // Store in memory for future access
+        state.sessions.lock().unwrap().insert(session_id.clone(), session.clone());
+        println!("📂 Backend: Session loaded from disk: {}", session_id);
+        return Ok(Some(session));
+    }
+    
+    Ok(None)
 }
 
 #[tauri::command]
@@ -486,6 +753,28 @@ async fn save_file(
 }
 
 #[tauri::command]
+async fn update_session(
+    session_id: String,
+    cells: Vec<serde_json::Value>,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    let session_data = serde_json::json!({
+        "sessionId": session_id,
+        "status": "active",
+        "cells": cells
+    });
+    
+    // Update in memory
+    state.sessions.lock().unwrap().insert(session_id.clone(), session_data.clone());
+    
+    // Save to disk
+    save_session_to_disk(&session_id, &session_data)?;
+    
+    println!("💾 Backend: Session updated and saved: {}", session_id);
+    Ok(())
+}
+
+#[tauri::command]
 async fn add_reference(
     project_id: String,
     reference: Reference,
@@ -532,6 +821,7 @@ fn main() {
             execute_code,
             save_session,
             load_session,
+            update_session,
             create_project,
             get_projects,
             get_project,

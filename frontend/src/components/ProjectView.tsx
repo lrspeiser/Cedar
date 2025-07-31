@@ -1,9 +1,10 @@
 import React, { useState } from 'react';
-import { ResearchSession } from './ResearchSession';
+import ResearchSession from './ResearchSession';
 import { DataTab } from './DataTab';
 import { ImagesTab } from './ImagesTab';
 import { ReferencesTab } from './ReferencesTab';
 import { WriteUpTab } from './WriteUpTab';
+import { apiService } from '../api';
 
 interface Project {
   id: string;
@@ -27,6 +28,18 @@ type TabType = 'notebook' | 'data' | 'images' | 'references' | 'write-up';
 export const ProjectView: React.FC<ProjectViewProps> = ({ project, onProjectUpdate }) => {
   const [activeTab, setActiveTab] = useState<TabType>('notebook');
   const [sessionId, setSessionId] = useState<string>(`session_${Date.now()}`);
+
+  // Function to refresh project data from backend
+  const refreshProjectData = async () => {
+    try {
+      const updatedProject = await apiService.getProject(project.id);
+      if (updatedProject) {
+        onProjectUpdate(updatedProject);
+      }
+    } catch (error) {
+      console.error('Failed to refresh project data:', error);
+    }
+  };
 
   const tabs = [
     { id: 'notebook', label: 'Notebook', icon: '📓' },
@@ -72,6 +85,7 @@ export const ProjectView: React.FC<ProjectViewProps> = ({ project, onProjectUpda
             sessionId={sessionId}
             projectId={project.id}
             goal={project.goal}
+            onContentGenerated={refreshProjectData}
           />
         );
       case 'data':
@@ -120,9 +134,17 @@ export const ProjectView: React.FC<ProjectViewProps> = ({ project, onProjectUpda
             <h1 className="text-2xl font-bold text-gray-800">{project.name}</h1>
             <p className="text-gray-600 mt-1">{project.goal}</p>
           </div>
-          <div className="text-sm text-gray-500">
-            <p>Created: {new Date(project.created_at).toLocaleDateString()}</p>
-            <p>Updated: {new Date(project.updated_at).toLocaleDateString()}</p>
+          <div className="flex items-center space-x-4">
+            <button
+              onClick={refreshProjectData}
+              className="px-4 py-2 bg-cedar-500 text-white rounded-md hover:bg-cedar-600 transition-colors text-sm"
+            >
+              🔄 Refresh
+            </button>
+            <div className="text-sm text-gray-500">
+              <p>Created: {new Date(project.created_at).toLocaleDateString()}</p>
+              <p>Updated: {new Date(project.updated_at).toLocaleDateString()}</p>
+            </div>
           </div>
         </div>
       </div>

@@ -17,12 +17,37 @@ interface ResearchSessionProps {
   sessionId: string
   projectId: string
   goal: string
+  onContentGenerated?: () => void
 }
 
-const ResearchSession: React.FC<ResearchSessionProps> = ({ sessionId, projectId, goal: initialGoal }) => {
+const ResearchSession: React.FC<ResearchSessionProps> = ({ sessionId, projectId, goal: initialGoal, onContentGenerated }) => {
   const [goal, setGoal] = useState(initialGoal)
   const [cells, setCells] = useState<Cell[]>([])
   const [isExecuting, setIsExecuting] = useState(false)
+
+  // Load session data on component mount
+  useEffect(() => {
+    const loadSessionData = async () => {
+      try {
+        const sessionData = await apiService.loadSession(sessionId)
+        if (sessionData && sessionData.cells) {
+          const loadedCells: Cell[] = sessionData.cells.map((cell: any) => ({
+            id: cell.id,
+            type: cell.type,
+            content: cell.content,
+            metadata: cell.metadata,
+            timestamp: new Date(cell.timestamp)
+          }))
+          setCells(loadedCells)
+          console.log("📂 Frontend: Loaded session with", loadedCells.length, "cells")
+        }
+      } catch (error) {
+        console.log("📂 Frontend: No existing session found, starting fresh")
+      }
+    }
+
+    loadSessionData()
+  }, [sessionId])
   const [showReferences, setShowReferences] = useState(false)
   const messagesEndRef = useRef<HTMLDivElement>(null)
 
@@ -66,6 +91,11 @@ const ResearchSession: React.FC<ResearchSessionProps> = ({ sessionId, projectId,
       }))
       
       setCells(prev => [...prev, ...apiCells])
+      
+      // Refresh project data to show newly categorized content
+      if (onContentGenerated) {
+        onContentGenerated()
+      }
     } catch (error) {
       console.error('Error starting research:', error)
       // Show error to user instead of fallback data
@@ -117,6 +147,11 @@ const ResearchSession: React.FC<ResearchSessionProps> = ({ sessionId, projectId,
       }
       
       setCells(prev => [...prev, ...newCells])
+      
+      // Refresh project data to show newly categorized content
+      if (onContentGenerated) {
+        onContentGenerated()
+      }
     } catch (error) {
       console.error('Error executing code:', error)
       // Show error to user instead of fallback data

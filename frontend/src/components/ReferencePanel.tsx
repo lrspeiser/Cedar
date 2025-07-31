@@ -1,6 +1,12 @@
 import React from 'react'
 import { X, ExternalLink, FileText } from 'lucide-react'
-import { Cell } from '../App'
+interface Cell {
+  id: string
+  type: 'intent' | 'plan' | 'code' | 'output' | 'reference' | 'validation'
+  content: string
+  metadata?: any
+  timestamp: Date
+}
 
 interface ReferencePanelProps {
   references: Cell[]
