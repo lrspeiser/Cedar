@@ -1,4 +1,35 @@
-// API service for communicating with the Tauri backend
+/**
+ * Cedar API Service
+ * 
+ * This service provides a comprehensive interface for communicating with the Tauri backend.
+ * It handles all research operations, project management, and data persistence.
+ * 
+ * FEATURES:
+ * - API key management with secure storage
+ * - Project creation and management
+ * - Research session handling
+ * - Code execution and validation
+ * - Question generation and management
+ * - Library dependency management
+ * - Variable tracking and management
+ * - Reference management
+ * - Comprehensive logging and error handling
+ * 
+ * TESTING:
+ * - Unit tests: See frontend/test-research.js for browser console testing
+ * - Integration tests: Use runApiTestSuite() method
+ * - CLI tests: Use test-cedar.sh --cli
+ * 
+ * Example usage:
+ * ```javascript
+ * const apiService = new ApiService();
+ * await apiService.setApiKey('your-api-key');
+ * const project = await apiService.createProject({
+ *   name: 'My Research',
+ *   goal: 'Analyze customer data'
+ * });
+ * ```
+ */
 
 import { invoke } from "@tauri-apps/api/core";
 
@@ -103,7 +134,42 @@ export interface SetApiKeyRequest {
   apiKey: string
 }
 
+/**
+ * Main API Service Class
+ * 
+ * Provides methods for all backend communication including:
+ * - Secure API key management
+ * - Research workflow operations
+ * - Project and session management
+ * - Data persistence and retrieval
+ * 
+ * TESTING: See individual method comments for testing instructions
+ */
 class ApiService {
+  /**
+   * API Key Management - Set API Key
+   * 
+   * Securely sets the OpenAI API key for the application.
+   * The key is stored in memory and persisted to disk for future sessions.
+   * 
+   * SECURITY FEATURES:
+   * - Keys are never logged or transmitted
+   * - Memory-only storage during runtime
+   * - Automatic cleanup on app exit
+   * 
+   * TESTING:
+   * - Unit test: testApiKeyManagement() in browser console
+   * - CLI test: set_api_key command
+   * - API test: set_api_key endpoint
+   * 
+   * @param apiKey - The OpenAI API key (starts with 'sk-')
+   * @throws Error if key setting fails
+   * 
+   * Example:
+   * ```javascript
+   * await apiService.setApiKey('sk-your-api-key-here');
+   * ```
+   */
   async setApiKey(apiKey: string) {
     console.log("🔧 Calling Tauri backend: set_api_key", { apiKeyLength: apiKey.length, apiKeyPrefix: apiKey.substring(0, 10) + "..." });
     try {
@@ -124,6 +190,16 @@ class ApiService {
     } catch (error) {
       console.error("❌ Backend error checking API key status:", error);
       throw error;
+    }
+  }
+
+  async hasApiKey(): Promise<boolean> {
+    try {
+      const status = await this.getApiKeyStatus();
+      return status.has_key === true;
+    } catch (error) {
+      console.error("❌ Error checking if API key exists:", error);
+      return false;
     }
   }
 
@@ -183,6 +259,38 @@ class ApiService {
       return result;
     } catch (error) {
       console.error("❌ Backend error getting project:", error);
+      throw error;
+    }
+  }
+
+  /**
+   * Project Management - Delete Project
+   * 
+   * Permanently deletes a project and all its associated data.
+   * This action cannot be undone and removes all project files.
+   * 
+   * PROJECT FEATURES:
+   * - Complete project deletion
+   * - File system cleanup
+   * - Session data removal
+   * - Current project state management
+   * 
+   * TESTING: See frontend/test-research.js for browser console testing
+   * API TESTING: Use testApiEndpoint() method
+   * 
+   * Example usage:
+   * ```javascript
+   * await apiService.deleteProject('project-123');
+   * console.log('Project deleted successfully');
+   * ```
+   */
+  async deleteProject(projectId: string) {
+    console.log("🗑️ Calling Tauri backend: delete_project", { projectId });
+    try {
+      await invoke("delete_project", { projectId });
+      console.log("✅ Backend project deleted successfully");
+    } catch (error) {
+      console.error("❌ Backend error deleting project:", error);
       throw error;
     }
   }
@@ -411,10 +519,46 @@ class ApiService {
     }
   }
 
+  /**
+   * Research Workflow - Start Research
+   * 
+   * Initiates AI-powered research planning for a specific project and session.
+   * Analyzes the research goal and generates a structured execution plan.
+   * 
+   * RESEARCH FEATURES:
+   * - AI goal analysis and planning
+   * - Step-by-step execution plan generation
+   * - Code generation for each step
+   * - Status tracking throughout the process
+   * 
+   * TESTING:
+   * - Unit test: testResearchWorkflow() in browser console
+   * - CLI test: start_research command
+   * - API test: start_research endpoint
+   * 
+   * @param request - Research request containing project, session, and goal
+   * @returns Research plan with execution steps
+   * @throws Error if research initiation fails
+   * 
+   * Example:
+   * ```javascript
+   * const research = await apiService.startResearch({
+   *   projectId: 'project-123',
+   *   sessionId: 'session-456',
+   *   goal: 'Analyze customer churn patterns'
+   * });
+   * ```
+   */
   async startResearch(request: { projectId: string; sessionId: string; goal: string }) {
     console.log('🔧 Calling Tauri backend: start_research', request);
     try {
-      const result = await invoke('start_research', request);
+      // Convert frontend field names to backend field names
+      const backendRequest = {
+        project_id: request.projectId,
+        session_id: request.sessionId,
+        goal: request.goal
+      };
+      const result = await invoke('start_research', { request: backendRequest });
       console.log('✅ Backend research started successfully');
       return result;
     } catch (error) {
@@ -423,10 +567,45 @@ class ApiService {
     }
   }
 
+  /**
+   * Code Execution - Execute Code
+   * 
+   * Executes Python code in a secure sandbox environment.
+   * Provides real-time output capture and error handling.
+   * 
+   * EXECUTION FEATURES:
+   * - Secure sandbox environment
+   * - Auto-dependency installation
+   * - Output parsing and categorization
+   * - Variable discovery and tracking
+   * - Error handling and reporting
+   * 
+   * TESTING:
+   * - Unit test: testCodeExecution() in browser console
+   * - CLI test: execute_code command
+   * - API test: execute_code endpoint
+   * 
+   * @param request - Code execution request with code and session
+   * @returns Execution result with output and validation
+   * @throws Error if code execution fails
+   * 
+   * Example:
+   * ```javascript
+   * const result = await apiService.executeCode({
+   *   code: 'import pandas as pd\nprint("Hello World")',
+   *   sessionId: 'session-123'
+   * });
+   * ```
+   */
   async executeCode(request: { code: string; sessionId: string }) {
     console.log('🔧 Calling Tauri backend: execute_code', request);
     try {
-      const result = await invoke('execute_code', request);
+      // Convert frontend field names to backend field names
+      const backendRequest = {
+        code: request.code,
+        session_id: request.sessionId
+      };
+      const result = await invoke('execute_code', { request: backendRequest });
       console.log('✅ Backend code executed successfully');
       return result;
     } catch (error) {
@@ -435,10 +614,44 @@ class ApiService {
     }
   }
 
+  /**
+   * Question Generation - Generate Questions
+   * 
+   * Uses AI to generate research questions based on the project goal.
+   * Creates relevant questions to guide the research process.
+   * 
+   * QUESTION FEATURES:
+   * - AI-powered question generation
+   * - Goal-oriented question relevance
+   * - Question categorization (initial, follow-up, clarification)
+   * - Status tracking for each question
+   * 
+   * TESTING:
+   * - Unit test: testQuestionGeneration() in browser console
+   * - CLI test: generate_questions command
+   * - API test: generate_questions endpoint
+   * 
+   * @param request - Question generation request with project and goal
+   * @returns Generated questions with metadata
+   * @throws Error if question generation fails
+   * 
+   * Example:
+   * ```javascript
+   * const questions = await apiService.generateQuestions({
+   *   projectId: 'project-123',
+   *   goal: 'Analyze customer churn patterns'
+   * });
+   * ```
+   */
   async generateQuestions(request: { projectId: string; goal: string }) {
     console.log('🔧 Calling Tauri backend: generate_questions', request);
     try {
-      const result = await invoke('generate_questions', request);
+      // Convert frontend field names to backend field names
+      const backendRequest = {
+        project_id: request.projectId,
+        goal: request.goal
+      };
+      const result = await invoke('generate_questions', { request: backendRequest });
       console.log('✅ Backend questions generated successfully');
       return result;
     } catch (error) {

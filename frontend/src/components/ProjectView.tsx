@@ -43,6 +43,9 @@ type TabType = 'notebook' | 'questions' | 'libraries' | 'data' | 'images' | 'ref
 const ProjectView: React.FC<ProjectViewProps> = ({ project, onBack }) => {
   const [activeTab, setActiveTab] = useState<TabType>('notebook');
   const [projectData, setProjectData] = useState<Project>(project);
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [deleteConfirmation, setDeleteConfirmation] = useState('');
+  const [isDeleting, setIsDeleting] = useState(false);
 
   const tabs = [
     { id: 'notebook', label: 'Notebook', icon: '📓' },
@@ -61,6 +64,27 @@ const ProjectView: React.FC<ProjectViewProps> = ({ project, onBack }) => {
       setProjectData(updatedProject);
     } catch (error) {
       console.error('Failed to refresh project data:', error);
+    }
+  };
+
+  const handleDeleteProject = async () => {
+    if (deleteConfirmation !== 'DELETE') {
+      alert('Please type "DELETE" to confirm deletion');
+      return;
+    }
+
+    try {
+      setIsDeleting(true);
+      await apiService.deleteProject(project.id);
+      alert('Project deleted successfully');
+      onBack(); // Go back to project list
+    } catch (error) {
+      console.error('Failed to delete project:', error);
+      alert('Failed to delete project: ' + error);
+    } finally {
+      setIsDeleting(false);
+      setShowDeleteConfirm(false);
+      setDeleteConfirmation('');
     }
   };
 
@@ -147,15 +171,66 @@ const ProjectView: React.FC<ProjectViewProps> = ({ project, onBack }) => {
               <p className="text-gray-600">{project.goal}</p>
             </div>
           </div>
-          <button
-            onClick={refreshProjectData}
-            className="px-3 py-2 bg-cedar-500 text-white rounded-md hover:bg-cedar-600 transition-colors flex items-center space-x-2"
-          >
-            <span>🔄</span>
-            <span>Refresh</span>
-          </button>
+          <div className="flex items-center space-x-2">
+            <button
+              onClick={refreshProjectData}
+              className="px-3 py-2 bg-cedar-500 text-white rounded-md hover:bg-cedar-600 transition-colors flex items-center space-x-2"
+            >
+              <span>🔄</span>
+              <span>Refresh</span>
+            </button>
+            <button
+              onClick={() => setShowDeleteConfirm(true)}
+              className="px-3 py-2 bg-red-500 text-white rounded-md hover:bg-red-600 transition-colors flex items-center space-x-2"
+            >
+              <span>🗑️</span>
+              <span>Delete Project</span>
+            </button>
+          </div>
         </div>
       </div>
+
+      {/* Delete Confirmation Dialog */}
+      {showDeleteConfirm && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-lg p-6 max-w-md w-full mx-4">
+            <h3 className="text-lg font-semibold text-gray-900 mb-4">
+              Delete Project
+            </h3>
+            <p className="text-gray-600 mb-4">
+              This action cannot be undone. All project data, files, and research will be permanently deleted.
+            </p>
+            <p className="text-gray-600 mb-4">
+              Type <strong>"DELETE"</strong> to confirm:
+            </p>
+            <input
+              type="text"
+              value={deleteConfirmation}
+              onChange={(e) => setDeleteConfirmation(e.target.value)}
+              className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-red-500 mb-4"
+              placeholder="Type DELETE to confirm"
+            />
+            <div className="flex space-x-2">
+              <button
+                onClick={handleDeleteProject}
+                disabled={isDeleting || deleteConfirmation !== 'DELETE'}
+                className="flex-1 bg-red-500 text-white px-4 py-2 rounded-md hover:bg-red-600 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                {isDeleting ? 'Deleting...' : 'Delete Project'}
+              </button>
+              <button
+                onClick={() => {
+                  setShowDeleteConfirm(false);
+                  setDeleteConfirmation('');
+                }}
+                className="flex-1 bg-gray-300 text-gray-700 px-4 py-2 rounded-md hover:bg-gray-400 transition-colors"
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Tab Navigation */}
       <div className="bg-white border-b border-gray-200">

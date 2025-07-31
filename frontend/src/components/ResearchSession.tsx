@@ -1,3 +1,37 @@
+/**
+ * Research Session Component
+ * 
+ * Main research interface that handles the complete research workflow:
+ * - Goal submission and AI planning
+ * - Code execution and monitoring
+ * - Progress tracking and visualization
+ * - Session persistence and management
+ * 
+ * RESEARCH WORKFLOW:
+ * 1. User submits research goal
+ * 2. AI generates research plan and questions
+ * 3. User answers clarifying questions (if needed)
+ * 4. AI executes research steps with code
+ * 5. Results are displayed and validated
+ * 6. Visualizations and final report are generated
+ * 
+ * TESTING:
+ * - Unit tests: Test goal submission, code execution, progress monitoring
+ * - Integration tests: Test complete research workflow
+ * - UI tests: Test component rendering and user interactions
+ * - Browser console: Use test-research.js for manual testing
+ * 
+ * Example usage:
+ * ```jsx
+ * <ResearchSession
+ *   sessionId="session-123"
+ *   projectId="project-456"
+ *   goal="Analyze customer churn patterns"
+ *   onContentGenerated={() => console.log('Research completed')}
+ * />
+ * ```
+ */
+
 import React, { useState, useEffect } from 'react';
 import { apiService } from '../api';
 import CellComponent from './CellComponent';

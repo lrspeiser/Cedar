@@ -53,6 +53,8 @@ get_projects
 start_research {"project_id": "cli-test-project", "session_id": "cli-test-session", "goal": "Test research goal"}
 execute_code {"code": "print('Hello from CLI test!')", "session_id": "cli-test-session"}
 generate_questions {"project_id": "cli-test-project", "goal": "Test research goal"}
+delete_project {"project_id": "cli-test-project"}
+get_projects
 exit
 EOF
     

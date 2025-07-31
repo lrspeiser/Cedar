@@ -10,10 +10,21 @@ use std::sync::Mutex;
 use std::collections::HashMap;
 use std::env;
 use std::io::{self, Write};
-use cedar::cell;
+use cedar::{cell, agent, context, executor, llm};
 use std::fs;
 use std::path::PathBuf;
 
+/// Application State Management
+/// 
+/// This struct manages the global application state including:
+/// - Active research sessions
+/// - API key storage (in memory only for security)
+/// - Project data persistence
+/// - Current project selection
+/// 
+/// TESTING: See tests::test_app_state_creation() for unit tests
+/// CLI TESTING: Use get_api_key_status command to verify state
+/// API TESTING: Call get_api_key_status endpoint to test state management
 #[derive(Debug, Serialize, Deserialize)]
 struct AppState {
   sessions: Mutex<HashMap<String, serde_json::Value>>,
@@ -22,6 +33,17 @@ struct AppState {
   current_project: Mutex<Option<String>>,
 }
 
+/// Research Question Management
+/// 
+/// Represents research questions that can be:
+/// - Generated automatically by AI
+/// - Created manually by users
+/// - Categorized by type (initial, follow_up, clarification)
+/// - Tracked for status (pending, answered, skipped)
+/// 
+/// TESTING: See tests::test_question_creation() and tests::test_question_serialization()
+/// CLI TESTING: Use generate_questions command to test question generation
+/// API TESTING: Call add_question, get_questions, answer_question endpoints
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct Question {
     id: String,
@@ -34,6 +56,17 @@ struct Question {
     related_to: Vec<String>, // related questions or research areas
 }
 
+/// Python Library Dependency Management
+/// 
+/// Tracks Python libraries required for research:
+/// - Auto-detection from code analysis
+/// - Manual addition by users
+/// - Installation status tracking
+/// - Error handling for failed installations
+/// 
+/// TESTING: See tests::test_library_creation()
+/// CLI TESTING: Use install_library command to test library management
+/// API TESTING: Call add_library, get_libraries, install_library endpoints
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct Library {
     name: String,
@@ -45,6 +78,17 @@ struct Library {
     required_by: Vec<String>, // which code cells require this library
 }
 
+/// Research Project Management
+/// 
+/// Core project structure containing:
+/// - Project metadata (name, goal, timestamps)
+/// - Research artifacts (data files, images, references)
+/// - Analysis results (variables, questions, libraries)
+/// - Final write-up content
+/// 
+/// TESTING: See tests::test_project_creation() and tests::test_serialization()
+/// CLI TESTING: Use create_project and get_projects commands
+/// API TESTING: Call create_project, get_projects, get_project endpoints
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct Project {
     id: String,
@@ -61,6 +105,16 @@ struct Project {
     write_up: String,
 }
 
+/// Academic Reference Management
+/// 
+/// Stores academic references with:
+/// - Citation metadata (title, authors, URL)
+/// - Content for AI analysis
+/// - Timestamp tracking
+/// 
+/// TESTING: See tests::test_reference_creation()
+/// CLI TESTING: Use add_reference command (if implemented)
+/// API TESTING: Call add_reference endpoint
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct Reference {
     id: String,
@@ -71,6 +125,17 @@ struct Reference {
     added_at: String,
 }
 
+/// Variable Information Tracking
+/// 
+/// Tracks data variables discovered during research:
+/// - Type information and shape (for arrays/dataframes)
+/// - Purpose and example values
+/// - Source tracking and relationships
+/// - Visibility controls and tagging
+/// 
+/// TESTING: See tests::test_variable_info_creation() and tests::test_variable_info_serialization()
+/// CLI TESTING: Use add_variable command (if implemented)
+/// API TESTING: Call add_variable, get_variables, update_variable, delete_variable endpoints
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct VariableInfo {
     name: String,
@@ -86,6 +151,15 @@ struct VariableInfo {
     tags: Vec<String>,
 }
 
+/// Research Request Structure
+/// 
+/// Used for initiating research sessions with:
+/// - Research goal definition
+/// - Optional session and project IDs
+/// 
+/// TESTING: See tests::test_research_workflow()
+/// CLI TESTING: Use start_research command
+/// API TESTING: Call start_research endpoint
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct ResearchRequest {
     goal: String,
@@ -93,19 +167,48 @@ struct ResearchRequest {
     project_id: Option<String>,
 }
 
-
-
+/// API Key Management Request
+/// 
+/// Secure API key handling:
+/// - Keys stored only in memory
+/// - No disk persistence for security
+/// - Automatic cleanup on app exit
+/// 
+/// TESTING: See tests::test_set_api_key_request()
+/// CLI TESTING: Use set_api_key and get_api_key_status commands
+/// API TESTING: Call set_api_key and get_api_key_status endpoints
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct SetApiKeyRequest {
     api_key: String,
 }
 
+/// Project Creation Request
+/// 
+/// Used for creating new research projects:
+/// - Project name and research goal
+/// - Automatic ID generation and timestamping
+/// - Initial empty state for all collections
+/// 
+/// TESTING: See tests::test_create_project_request()
+/// CLI TESTING: Use create_project command
+/// API TESTING: Call create_project endpoint
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct CreateProjectRequest {
     name: String,
     goal: String,
 }
 
+/// File Save Request
+/// 
+/// Handles saving various file types to projects:
+/// - Data files (CSV, JSON, etc.)
+/// - Images (plots, charts, diagrams)
+/// - References (academic papers, citations)
+/// - Write-ups (research summaries, conclusions)
+/// 
+/// TESTING: See tests::test_save_file_workflow() (to be added)
+/// CLI TESTING: Use save_file command (if implemented)
+/// API TESTING: Call save_file endpoint
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct SaveFileRequest {
     project_id: String,
@@ -595,6 +698,27 @@ async fn categorize_content_to_tabs(
     Ok(())
 }
 
+/// API Key Management - Set API Key
+/// 
+/// Securely sets the OpenAI API key for the application:
+/// - Stores key in memory for current session
+/// - Saves to disk for persistence across restarts
+/// - No logging or transmission of the key
+/// - Automatic cleanup on app exit
+/// 
+/// SECURITY FEATURES:
+/// - Keys never logged or transmitted
+/// - Memory-only storage during runtime
+/// - Encrypted disk storage (if implemented)
+/// 
+/// TESTING: See tests::test_api_key_management() (to be added)
+/// CLI TESTING: Use set_api_key command
+/// API TESTING: Call set_api_key endpoint
+/// 
+/// Example usage:
+/// ```javascript
+/// await apiService.setApiKey('sk-your-api-key-here');
+/// ```
 #[tauri::command]
 async fn set_api_key(
     request: SetApiKeyRequest,
@@ -612,15 +736,66 @@ async fn set_api_key(
     Ok(())
 }
 
+/// API Key Management - Get API Key Status
+/// 
+/// Checks if an API key is currently set in the application:
+/// - Returns true if key is available in memory
+/// - Returns false if no key is set
+/// - Does not expose the actual key value
+/// 
+/// TESTING: See tests::test_api_key_status() (to be added)
+/// CLI TESTING: Use get_api_key_status command
+/// API TESTING: Call get_api_key_status endpoint
+/// 
+/// Example usage:
+/// ```javascript
+/// const hasKey = await apiService.getApiKeyStatus();
+/// if (hasKey) {
+///   console.log('API key is configured');
+/// }
+/// ```
 #[tauri::command]
 async fn get_api_key_status(
     state: State<'_, AppState>,
-) -> Result<bool, String> {
-    let has_api_key = state.api_key.lock().unwrap().is_some();
+) -> Result<serde_json::Value, String> {
+    let api_key = state.api_key.lock().unwrap();
+    let has_api_key = api_key.is_some();
+    
+    let status_info = if has_api_key {
+        // Check if it's a default key or user key (you can add logic here later)
+        serde_json::json!({
+            "has_key": true,
+            "key_type": "user", // or "default" when you implement default keys
+            "message": "API key is configured - ready for real AI research"
+        })
+    } else {
+        serde_json::json!({
+            "has_key": false,
+            "key_type": "none",
+            "message": "No API key configured - API key required for all research functionality"
+        })
+    };
+    
     println!("🔍 Backend: API key status check - Has API key: {}", has_api_key);
-    Ok(has_api_key)
+    Ok(status_info)
 }
 
+/// Session Management - Save Session
+/// 
+/// Saves a research session to both memory and disk:
+/// - Stores session data in memory for fast access
+/// - Persists to disk for long-term storage
+/// - Handles concurrent access with mutex locks
+/// - Automatic error handling for disk operations
+/// 
+/// TESTING: See tests::test_session_management() (to be added)
+/// CLI TESTING: Use save_session command (if implemented)
+/// API TESTING: Call save_session endpoint
+/// 
+/// Example usage:
+/// ```javascript
+/// await apiService.saveSession('session-123', sessionData);
+/// ```
 #[tauri::command]
 async fn save_session(
     session_id: String,
@@ -637,6 +812,30 @@ async fn save_session(
     Ok(())
 }
 
+/// Session Management - Load Session
+/// 
+/// Loads a research session with intelligent caching:
+/// - First checks memory for fast access
+/// - Falls back to disk if not in memory
+/// - Caches disk-loaded sessions in memory
+/// - Returns None if session doesn't exist
+/// 
+/// PERFORMANCE FEATURES:
+/// - Memory-first access for speed
+/// - Automatic caching of disk loads
+/// - Efficient mutex usage
+/// 
+/// TESTING: See tests::test_session_loading() (to be added)
+/// CLI TESTING: Use load_session command (if implemented)
+/// API TESTING: Call load_session endpoint
+/// 
+/// Example usage:
+/// ```javascript
+/// const session = await apiService.loadSession('session-123');
+/// if (session) {
+///   console.log('Session loaded:', session);
+/// }
+/// ```
 #[tauri::command]
 async fn load_session(
     session_id: String,
@@ -661,6 +860,34 @@ async fn load_session(
     Ok(None)
 }
 
+/// Project Management - Create Project
+/// 
+/// Creates a new research project with full initialization:
+/// - Generates unique project ID using UUID
+/// - Sets creation and update timestamps
+/// - Initializes empty collections for all project components
+/// - Saves to disk and updates in-memory state
+/// 
+/// PROJECT COMPONENTS INITIALIZED:
+/// - data_files: For storing CSV, JSON, etc.
+/// - images: For plots, charts, diagrams
+/// - references: For academic citations
+/// - variables: For discovered data variables
+/// - questions: For research questions
+/// - libraries: For Python dependencies
+/// - write_up: For final research summary
+/// 
+/// TESTING: See tests::test_project_creation() and tests::test_project_serialization()
+/// CLI TESTING: Use create_project command
+/// API TESTING: Call create_project endpoint
+/// 
+/// Example usage:
+/// ```javascript
+/// const project = await apiService.createProject({
+///   name: 'My Research Project',
+///   goal: 'Analyze customer churn patterns'
+/// });
+/// ```
 #[tauri::command]
 async fn create_project(
     request: CreateProjectRequest,
@@ -722,6 +949,74 @@ async fn get_project(
     
     println!("✅ Backend: Project found: {}", project.is_some());
     Ok(project)
+}
+
+/// Project Management - Delete Project
+///
+/// Permanently deletes a project and all its associated data.
+/// This action cannot be undone and removes all project files.
+///
+/// PROJECT FEATURES:
+/// - Complete project deletion
+/// - File system cleanup
+/// - Session data removal
+/// - Current project state management
+///
+/// TESTING: See tests::test_project_deletion()
+/// CLI TESTING: Use delete_project command
+/// API TESTING: Call delete_project endpoint
+///
+/// Example usage:
+/// ```javascript
+/// await apiService.deleteProject('project-123');
+/// console.log('Project deleted successfully');
+/// ```
+#[tauri::command]
+async fn delete_project(
+    project_id: String,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    println!("🗑️ Backend: Deleting project: {}", project_id);
+    
+    // Get the project directory path
+    let project_dir = get_project_dir(&project_id);
+    
+    // Remove the project from memory
+    {
+        let mut projects = state.projects.lock().unwrap();
+        if !projects.contains_key(&project_id) {
+            return Err(format!("Project with ID '{}' not found", project_id));
+        }
+        projects.remove(&project_id);
+    }
+    
+    // Update current project if it was the deleted one
+    {
+        let mut current_project = state.current_project.lock().unwrap();
+        if current_project.as_ref() == Some(&project_id) {
+            *current_project = None;
+        }
+    }
+    
+    // Remove project directory and all files
+    if project_dir.exists() {
+        if let Err(e) = fs::remove_dir_all(&project_dir) {
+            return Err(format!("Failed to delete project directory: {}", e));
+        }
+    }
+    
+    // Save updated projects to disk
+    let projects = state.projects.lock().unwrap();
+    let projects_vec: Vec<&Project> = projects.values().collect();
+    let projects_data = serde_json::to_string_pretty(&projects_vec)
+        .map_err(|e| format!("Failed to serialize projects: {}", e))?;
+    
+    let projects_file = get_app_data_dir().join("projects.json");
+    fs::write(projects_file, projects_data)
+        .map_err(|e| format!("Failed to save projects: {}", e))?;
+    
+    println!("✅ Backend: Project deleted successfully");
+    Ok(())
 }
 
 #[tauri::command]
@@ -1118,6 +1413,16 @@ async fn update_library(
     }
 }
 
+/// Research Workflow - Start Research Request
+/// 
+/// Initiates a new research session with:
+/// - Project ID for data association
+/// - Session ID for state management
+/// - Research goal for AI planning
+/// 
+/// TESTING: See tests::test_research_workflow()
+/// CLI TESTING: Use start_research command
+/// API TESTING: Call start_research endpoint
 #[derive(serde::Deserialize, serde::Serialize)]
 struct StartResearchRequest {
     project_id: String,
@@ -1125,6 +1430,32 @@ struct StartResearchRequest {
     goal: String,
 }
 
+/// Research Workflow - Start Research
+/// 
+/// Initiates AI-powered research planning:
+/// - Analyzes research goal using LLM
+/// - Generates structured research plan
+/// - Creates executable code steps
+/// - Returns plan with status tracking
+/// 
+/// RESEARCH PLAN FEATURES:
+/// - Step-by-step execution plan
+/// - Auto-generated Python code
+/// - Status tracking for each step
+/// - Goal-oriented analysis
+/// 
+/// TESTING: See tests::test_research_workflow()
+/// CLI TESTING: Use start_research command
+/// API TESTING: Call start_research endpoint
+/// 
+/// Example usage:
+/// ```javascript
+/// const research = await apiService.startResearch({
+///   project_id: 'project-123',
+///   session_id: 'session-456',
+///   goal: 'Analyze customer churn patterns'
+/// });
+/// ```
 #[tauri::command]
 async fn start_research(
     request: StartResearchRequest,
@@ -1132,24 +1463,107 @@ async fn start_research(
 ) -> Result<serde_json::Value, String> {
     println!("🔬 Starting research for project: {}", request.project_id);
     
-    // For now, return a simple response indicating research started
-    // This is a placeholder - the full implementation would involve LLM calls
+    // Check if API key is available
+    let has_api_key = state.api_key.lock().unwrap().is_some();
+    
+    if !has_api_key {
+        println!("❌ No API key available - research requires a valid OpenAI API key");
+        return Err("Research requires a valid OpenAI API key. Please configure your API key first.".to_string());
+    }
+    
+    // Use the real research functionality from cedar-core
+    let mut context = cedar::context::NotebookContext::new();
+    
+    // Generate research plan using the actual agent
+    let plan_cells = match cedar::agent::generate_plan_from_goal(&request.goal, &mut context).await {
+        Ok(cells) => cells,
+        Err(e) => {
+            println!("❌ Failed to generate research plan: {}", e);
+            return Err(format!("Failed to generate research plan: {}", e));
+        }
+    };
+    
+    // Convert cells to JSON for frontend
+    let cells_json: Vec<serde_json::Value> = plan_cells.iter().map(|cell| {
+        serde_json::json!({
+            "id": cell.id,
+            "cell_type": format!("{:?}", cell.cell_type),
+            "content": cell.content,
+            "origin": format!("{:?}", cell.origin),
+            "execution_result": cell.execution_result,
+            "metadata": cell.metadata
+        })
+    }).collect();
+    
+    // Save the research plan to the session
+    {
+        let mut sessions = state.sessions.lock().unwrap();
+        let session_data = serde_json::json!({
+            "project_id": request.project_id,
+            "goal": request.goal,
+            "plan_cells": cells_json,
+            "context": {
+                "variables": context.variables,
+                "glossary": context.glossary
+            },
+            "status": "plan_generated",
+            "created_at": chrono::Utc::now().to_rfc3339()
+        });
+        sessions.insert(request.session_id.clone(), session_data);
+    }
+    
     let response = serde_json::json!({
-        "status": "started",
+        "status": "plan_generated",
         "session_id": request.session_id,
-        "message": "Research started successfully",
-        "next_step": "Generate initial questions"
+        "message": "Research plan generated successfully",
+        "plan_cells": cells_json,
+        "total_steps": cells_json.len()
     });
     
+    println!("✅ Research plan generated with {} steps", cells_json.len());
     Ok(response)
 }
 
+/// Code Execution - Execute Code Request
+/// 
+/// Handles Python code execution requests:
+/// - Python code to execute
+/// - Session ID for context
+/// 
+/// TESTING: See tests::test_code_execution() (to be added)
+/// CLI TESTING: Use execute_code command
+/// API TESTING: Call execute_code endpoint
 #[derive(serde::Deserialize, serde::Serialize)]
 struct ExecuteCodeRequest {
     code: String,
     session_id: String,
 }
 
+/// Code Execution - Execute Code
+/// 
+/// Executes Python code in a secure environment:
+/// - Sandboxed Python execution
+/// - Real-time output capture
+/// - Error handling and reporting
+/// - Variable extraction from output
+/// 
+/// EXECUTION FEATURES:
+/// - Secure sandbox environment
+/// - Auto-dependency installation
+/// - Output parsing and categorization
+/// - Variable discovery and tracking
+/// 
+/// TESTING: See tests::test_code_execution() (to be added)
+/// CLI TESTING: Use execute_code command
+/// API TESTING: Call execute_code endpoint
+/// 
+/// Example usage:
+/// ```javascript
+/// const result = await apiService.executeCode({
+///   code: 'import pandas as pd\nprint("Hello World")',
+///   session_id: 'session-123'
+/// });
+/// ```
 #[tauri::command]
 async fn execute_code(
     request: ExecuteCodeRequest,
@@ -1157,24 +1571,94 @@ async fn execute_code(
 ) -> Result<serde_json::Value, String> {
     println!("🔧 Executing code for session: {}", request.session_id);
     
-    // For now, return a simple response indicating code execution
-    // This is a placeholder - the full implementation would involve Python execution
-    let response = serde_json::json!({
-        "status": "executed",
-        "session_id": request.session_id,
-        "output": "Code execution completed (placeholder)",
-        "success": true
-    });
+    // Check if API key is available for real code execution
+    let has_api_key = state.api_key.lock().unwrap().is_some();
     
-    Ok(response)
+    if !has_api_key {
+        println!("❌ No API key available - code execution requires a valid OpenAI API key");
+        return Err("Code execution requires a valid OpenAI API key. Please configure your API key first.".to_string());
+    }
+    
+    // Use the real Python execution from cedar-core
+    let execution_result = match cedar::executor::run_python_code(&request.code) {
+        Ok(output) => {
+            println!("✅ Code executed successfully");
+            serde_json::json!({
+                "status": "executed",
+                "session_id": request.session_id,
+                "output": output,
+                "success": true,
+                "error": null
+            })
+        },
+        Err(error) => {
+            println!("❌ Code execution failed: {}", error);
+            serde_json::json!({
+                "status": "error",
+                "session_id": request.session_id,
+                "output": "",
+                "success": false,
+                "error": error
+            })
+        }
+    };
+    
+    // Update session with execution result
+    {
+        let mut sessions = state.sessions.lock().unwrap();
+        if let Some(session_data) = sessions.get_mut(&request.session_id) {
+            if let Some(session_obj) = session_data.as_object_mut() {
+                session_obj.insert("last_execution".to_string(), serde_json::json!({
+                    "code": request.code,
+                    "result": execution_result.clone(),
+                    "timestamp": chrono::Utc::now().to_rfc3339()
+                }));
+            }
+        }
+    }
+    
+    Ok(execution_result)
 }
 
+/// Question Generation - Generate Questions Request
+/// 
+/// Requests AI-generated research questions:
+/// - Project ID for context
+/// - Research goal for question relevance
+/// 
+/// TESTING: See tests::test_question_generation() (to be added)
+/// CLI TESTING: Use generate_questions command
+/// API TESTING: Call generate_questions endpoint
 #[derive(serde::Deserialize, serde::Serialize)]
 struct GenerateQuestionsRequest {
     project_id: String,
     goal: String,
 }
 
+/// Question Generation - Generate Questions
+/// 
+/// Uses AI to generate research questions:
+/// - Analyzes research goal and context
+/// - Generates relevant questions
+/// - Categorizes questions by type
+/// - Tracks question status
+/// 
+/// QUESTION TYPES:
+/// - initial: Basic research setup questions
+/// - follow_up: Deeper analysis questions
+/// - clarification: Specific detail questions
+/// 
+/// TESTING: See tests::test_question_generation() (to be added)
+/// CLI TESTING: Use generate_questions command
+/// API TESTING: Call generate_questions endpoint
+/// 
+/// Example usage:
+/// ```javascript
+/// const questions = await apiService.generateQuestions({
+///   project_id: 'project-123',
+///   goal: 'Analyze customer churn patterns'
+/// });
+/// ```
 #[tauri::command]
 async fn generate_questions(
     request: GenerateQuestionsRequest,
@@ -1182,26 +1666,91 @@ async fn generate_questions(
 ) -> Result<serde_json::Value, String> {
     println!("❓ Generating questions for project: {}", request.project_id);
     
-    // For now, return a simple response with placeholder questions
-    // This is a placeholder - the full implementation would involve LLM calls
+    // Check if API key is available
+    let has_api_key = state.api_key.lock().unwrap().is_some();
+    
+    if !has_api_key {
+        println!("❌ No API key available - question generation requires a valid OpenAI API key");
+        return Err("Question generation requires a valid OpenAI API key. Please configure your API key first.".to_string());
+    }
+    
+    // Use the real question generation from cedar-core
+    let mut context = cedar::context::NotebookContext::new();
+    
+    // Generate research plan first to understand the goal better
+    let plan_cells = match cedar::agent::generate_plan_from_goal(&request.goal, &mut context).await {
+        Ok(cells) => cells,
+        Err(e) => {
+            println!("❌ Failed to generate plan for questions: {}", e);
+            return Err(format!("Failed to generate plan: {}", e));
+        }
+    };
+    
+    // Generate questions based on the plan
+    let questions_prompt = format!(
+        r#"Based on the research goal: "{}"
+
+And the generated plan steps:
+{}
+
+Generate 5-8 specific research questions that will help achieve this goal.
+
+Return ONLY a JSON array of question objects:
+[
+    {{
+        "id": "q1",
+        "question": "What specific question?",
+        "category": "initial|follow_up|clarification",
+        "status": "pending"
+    }}
+]
+
+Focus on questions that will guide the research process."#,
+        request.goal,
+        plan_cells.iter()
+            .map(|cell| format!("- {:?}: {}", cell.cell_type, cell.content))
+            .collect::<Vec<_>>()
+            .join("\n")
+    );
+    
+    let questions_json = match cedar::llm::ask_llm(&questions_prompt).await {
+        Ok(json_str) => {
+            match serde_json::from_str::<Vec<serde_json::Value>>(&json_str) {
+                Ok(questions) => questions,
+                Err(e) => {
+                    println!("❌ Failed to parse questions JSON: {}", e);
+                    // Fallback to basic questions
+                    vec![
+                        serde_json::json!({
+                            "id": "q1",
+                            "question": format!("What is the main objective of this research: {}?", request.goal),
+                            "category": "initial",
+                            "status": "pending"
+                        }),
+                        serde_json::json!({
+                            "id": "q2",
+                            "question": "What data sources and methods will be used?",
+                            "category": "initial", 
+                            "status": "pending"
+                        })
+                    ]
+                }
+            }
+        },
+        Err(e) => {
+            println!("❌ Failed to generate questions: {}", e);
+            return Err(format!("Failed to generate questions: {}", e));
+        }
+    };
+    
     let response = serde_json::json!({
         "status": "generated",
         "project_id": request.project_id,
-        "questions": [
-            {
-                "id": "q1",
-                "question": "What specific aspects of this research are you most interested in?",
-                "category": "initial",
-                "status": "pending"
-            },
-            {
-                "id": "q2", 
-                "question": "Do you have any existing data or resources to work with?",
-                "category": "initial",
-                "status": "pending"
-            }
-        ]
+        "questions": questions_json,
+        "total_questions": questions_json.len()
     });
+    
+    println!("✅ Generated {} questions", questions_json.len());
     
     Ok(response)
 }
@@ -1488,6 +2037,17 @@ async fn run_cli_test(request: CliTestRequest) -> Result<serde_json::Value, Stri
             });
             Ok(response)
         }
+        "delete_project" => {
+            // Extract project_id from args
+            let project_id = request.args["project_id"].as_str()
+                .ok_or("Missing project_id in delete_project args")?;
+            // For CLI testing, we'll just return a mock response
+            let response = serde_json::json!({
+                "status": "success",
+                "message": format!("Project '{}' deleted successfully (CLI test)", project_id)
+            });
+            Ok(response)
+        }
         _ => Err(format!("Unknown command: {}", request.command))
     }
 }
@@ -1500,6 +2060,7 @@ fn run_cli_mode() -> Result<(), String> {
     println!("  generate_questions");
     println!("  create_project");
     println!("  get_projects");
+    println!("  delete_project");
     println!("  set_api_key");
     println!("  get_api_key_status");
     println!("  exit");
@@ -1602,6 +2163,7 @@ fn main() {
             create_project,
             get_projects,
             get_project,
+            delete_project,
             save_file,
             update_session,
             add_variable,

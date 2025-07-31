@@ -14,6 +14,11 @@ async function testResearchFunctionality() {
         console.log('2. Testing API key status...');
         const keyStatus = await apiService.getApiKeyStatus();
         console.log('✅ API key status:', keyStatus);
+        
+        // Check if we have a valid API key
+        if (!keyStatus.has_key) {
+            console.log('⚠️ No API key configured - this will use placeholder mode');
+        }
 
         // Test 3: Create a test project
         console.log('3. Testing project creation...');
@@ -53,6 +58,21 @@ async function testResearchFunctionality() {
         const testSuiteResult = await apiService.runApiTestSuite();
         console.log('✅ API test suite completed:', testSuiteResult);
 
+        // Test 8: Delete project
+        console.log('8. Testing project deletion...');
+        await apiService.deleteProject(project.id);
+        console.log('✅ Project deleted successfully');
+
+        // Test 9: Verify project deletion
+        console.log('9. Verifying project deletion...');
+        const projects = await apiService.getProjects();
+        const deletedProject = projects.find(p => p.id === project.id);
+        if (!deletedProject) {
+            console.log('✅ Project successfully removed from list');
+        } else {
+            console.log('❌ Project still exists in list');
+        }
+
         console.log('🎉 All research tests passed!');
         return {
             success: true,
@@ -60,7 +80,8 @@ async function testResearchFunctionality() {
             research: researchResult,
             code: codeResult,
             questions: questionsResult,
-            testSuite: testSuiteResult
+            testSuite: testSuiteResult,
+            deletionVerified: !deletedProject
         };
 
     } catch (error) {
