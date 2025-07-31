@@ -2,6 +2,74 @@
 
 import { invoke } from "@tauri-apps/api/core";
 
+// Add logging function to save logs to files
+export const saveLogToFile = async (level: string, message: string) => {
+  try {
+    const timestamp = new Date().toISOString();
+    const logEntry = `[${timestamp}] [${level}] ${message}\n`;
+    
+    // Save to a log file in the project directory
+    await invoke("save_file", {
+      request: {
+        project_id: "system",
+        filename: `cedar-frontend-${level.toLowerCase()}.log`,
+        content: logEntry,
+        file_type: "log"
+      }
+    });
+  } catch (error) {
+    // Fallback to console if Tauri API is not available
+    console.error("Failed to save log to file:", error);
+  }
+};
+
+// Enhanced console logging that saves to files
+const originalConsoleLog = console.log;
+const originalConsoleError = console.error;
+const originalConsoleWarn = console.warn;
+const originalConsoleInfo = console.info;
+const originalConsoleDebug = console.debug;
+
+console.log = (...args) => {
+  originalConsoleLog(...args);
+  const message = args.map(arg => 
+    typeof arg === 'object' ? JSON.stringify(arg, null, 2) : String(arg)
+  ).join(' ');
+  saveLogToFile('LOG', message);
+};
+
+console.error = (...args) => {
+  originalConsoleError(...args);
+  const message = args.map(arg => 
+    typeof arg === 'object' ? JSON.stringify(arg, null, 2) : String(arg)
+  ).join(' ');
+  saveLogToFile('ERROR', message);
+};
+
+console.warn = (...args) => {
+  originalConsoleWarn(...args);
+  const message = args.map(arg => 
+    typeof arg === 'object' ? JSON.stringify(arg, null, 2) : String(arg)
+  ).join(' ');
+  saveLogToFile('WARN', message);
+};
+
+console.info = (...args) => {
+  originalConsoleInfo(...args);
+  const message = args.map(arg => 
+    typeof arg === 'object' ? JSON.stringify(arg, null, 2) : String(arg)
+  ).join(' ');
+  saveLogToFile('INFO', message);
+};
+
+console.debug = (...args) => {
+  originalConsoleDebug(...args);
+  const message = args.map(arg => 
+    typeof arg === 'object' ? JSON.stringify(arg, null, 2) : String(arg)
+  ).join(' ');
+  saveLogToFile('DEBUG', message);
+};
+
 export interface ResearchRequest {
   goal: string
   session_id?: string
@@ -65,29 +133,29 @@ class ApiService {
     }
   }
 
-  async startResearch(request: { goal: string; session_id?: string; project_id?: string }) {
-    console.log("🔧 Calling Tauri backend: start_research", { goal: request.goal, session_id: request.session_id, project_id: request.project_id });
-    try {
-      const result = await invoke("start_research", { request });
-      console.log("✅ Backend research started successfully");
-      return result;
-    } catch (error) {
-      console.error("❌ Backend error starting research:", error);
-      throw error;
-    }
-  }
+  // async startResearch(request: { goal: string; session_id?: string; project_id?: string }) {
+  //   console.log("🔧 Calling Tauri backend: start_research", { goal: request.goal, session_id: request.session_id, project_id: request.project_id });
+  //   try {
+  //     const result = await invoke("start_research", { request });
+  //     console.log("✅ Backend research started successfully");
+  //     return result;
+  //   } catch (error) {
+  //     console.error("❌ Backend error starting research:", error);
+  //     throw error;
+  //   }
+  // }
 
-  async executeCode(request: { code: string; session_id: string; project_id: string }) {
-    console.log("🔧 Calling Tauri backend: execute_code", { codeLength: request.code.length, session_id: request.session_id, project_id: request.project_id });
-    try {
-      const result = await invoke("execute_code", { request });
-      console.log("✅ Backend code executed successfully");
-      return result;
-    } catch (error) {
-      console.error("❌ Backend error executing code:", error);
-      throw error;
-    }
-  }
+  // async executeCode(request: { code: string; session_id: string; project_id: string }) {
+  //   console.log("🔧 Calling Tauri backend: execute_code", { codeLength: request.code.length, session_id: request.session_id, project_id: request.project_id });
+  //   try {
+  //     const result = await invoke("execute_code", { request });
+  //     console.log("✅ Backend code executed successfully");
+  //     return result;
+  //   } catch (error) {
+  //     console.error("❌ Backend error executing code:", error);
+  //     throw error;
+  //   }
+  // }
 
   async createProject(request: { name: string; goal: string }) {
     console.log("🔧 Calling Tauri backend: create_project", { name: request.name, goal: request.goal });
@@ -268,17 +336,17 @@ class ApiService {
     }
   }
 
-  async generateQuestions(projectId: string, context: 'initial' | 'follow_up') {
-    console.log('🔧 Calling Tauri backend: generate_questions', { projectId, context });
-    try {
-      const questions = await invoke('generate_questions', { projectId, context });
-      console.log('✅ Backend questions generated successfully');
-      return questions;
-    } catch (error) {
-      console.error('❌ Backend error generating questions:', error);
-      throw error;
-    }
-  }
+  // async generateQuestions(projectId: string, context: 'initial' | 'follow_up') {
+  //   console.log('🔧 Calling Tauri backend: generate_questions', { projectId, context });
+  //   try {
+  //     const questions = await invoke('generate_questions', { projectId, context });
+  //     console.log('✅ Backend questions generated successfully');
+  //     return questions;
+  //   } catch (error) {
+  //     console.error('❌ Backend error generating questions:', error);
+  //     throw error;
+  //   }
+  // }
 
   async updateQuestion(projectId: string, questionId: string, updates: any) {
     console.log('🔧 Calling Tauri backend: update_question', { projectId, questionId, updates });
@@ -326,16 +394,17 @@ class ApiService {
     }
   }
 
-  async installAllLibraries(projectId: string) {
-    console.log('🔧 Calling Tauri backend: install_all_libraries', { projectId });
-    try {
-      await invoke('install_all_libraries', { projectId });
-      console.log('✅ Backend all libraries installed successfully');
-    } catch (error) {
-      console.error('❌ Backend error installing all libraries:', error);
-      throw error;
-    }
-  }
+  // async installAllLibraries(projectId: string) {
+  //   console.log("🔧 Calling Tauri backend: install_all_libraries", { projectId });
+  //   try {
+  //     const result = await invoke("install_all_libraries", { projectId });
+  //     console.log("✅ Backend libraries installed successfully");
+  //     return result;
+  //   } catch (error) {
+  //     console.error("❌ Backend error installing libraries:", error);
+  //     throw error;
+  //   }
+  // }
 
   async updateLibrary(projectId: string, libraryName: string, updates: any) {
     console.log('🔧 Calling Tauri backend: update_library', { projectId, libraryName, updates });
@@ -348,64 +417,53 @@ class ApiService {
     }
   }
 
-  async extractLibrariesFromCode(projectId: string, code: string, cellId: string) {
-    console.log('🔧 Calling Tauri backend: extract_libraries_from_code', { projectId, code, cellId });
-    try {
-      const libraries = await invoke('extract_libraries_from_code', { projectId, code, cellId });
-      console.log('✅ Backend libraries extracted successfully');
-      return libraries;
-    } catch (error) {
-      console.error('❌ Backend error extracting libraries:', error);
-      throw error;
-    }
-  }
+  // async extractLibrariesFromCode(projectId: string, code: string, cellId: string) {
+  //   console.log("🔧 Calling Tauri backend: extract_libraries_from_code", { projectId, codeLength: code.length, cellId });
+  //   try {
+  //     const result = await invoke("extract_libraries_from_code", { projectId, code, cellId });
+  //     console.log("✅ Backend libraries extracted successfully");
+  //     return result;
+  //   } catch (error) {
+  //     console.error("❌ Backend error extracting libraries:", error);
+  //     throw error;
+  //   }
+  // }
 
-  async executeResearchSteps(projectId: string, sessionId: string, goal: string, steps: any[], startStep?: number) {
-    console.log('🔧 Calling Tauri backend: execute_research_steps', { projectId, sessionId, goal, steps, startStep });
-    try {
-      const result = await invoke('execute_research_steps', { 
-        request: { projectId, sessionId, goal, steps, startStep } 
-      });
-      console.log('✅ Backend research steps executed successfully');
-      return result;
-    } catch (error) {
-      console.error('❌ Backend error executing research steps:', error);
-      throw error;
-    }
-  }
+  // async executeResearchSteps(projectId: string, sessionId: string, goal: string, steps: any[], startStep?: number) {
+  //   console.log("🔧 Calling Tauri backend: execute_research_steps", { projectId, sessionId, goal, stepsCount: steps.length, startStep });
+  //   try {
+  //     const result = await invoke("execute_research_steps", { projectId, sessionId, goal, steps, startStep });
+  //     console.log("✅ Backend research steps executed successfully");
+  //     return result;
+  //   } catch (error) {
+  //     console.error("❌ Backend error executing research steps:", error);
+  //     throw error;
+  //   }
+  // }
 
-  async generateVisualizations(projectId: string, goal: string, allResults: string[]) {
-    console.log('🎨 Calling Tauri backend: generate_visualizations', { projectId, goal, allResults });
-    try {
-      const result = await invoke('generate_visualizations', { 
-        projectId, 
-        goal, 
-        allResults 
-      });
-      console.log('✅ Backend visualizations generated successfully');
-      return result;
-    } catch (error) {
-      console.error('❌ Backend error generating visualizations:', error);
-      throw error;
-    }
-  }
+  // async generateVisualizations(projectId: string, goal: string, allResults: string[]) {
+  //   console.log("🔧 Calling Tauri backend: generate_visualizations", { projectId, goal, resultsCount: allResults.length });
+  //   try {
+  //     const result = await invoke("generate_visualizations", { projectId, goal, allResults });
+  //     console.log("✅ Backend visualizations generated successfully");
+  //     return result;
+  //   } catch (error) {
+  //     console.error("❌ Backend error generating visualizations:", error);
+  //     throw error;
+  //   }
+  // }
 
-  async updateResearchPaper(projectId: string, goal: string, allResults: string[], visualizations: any[]) {
-    console.log('📝 Calling Tauri backend: update_research_paper', { projectId, goal, allResults, visualizations });
-    try {
-      const result = await invoke('update_research_paper', { 
-        projectId, 
-        goal, 
-        allResults, 
-        visualizations 
-      });
-      console.log('✅ Backend research paper updated successfully');
-      return result;
-    } catch (error) {
-      console.error('❌ Backend error updating research paper:', error);
-      throw error;
-    }
-  }
+  // async updateResearchPaper(projectId: string, goal: string, allResults: string[], visualizations: any[]) {
+  //   console.log("🔧 Calling Tauri backend: update_research_paper", { projectId, goal, allResults, visualizations });
+  //   try {
+  //     const result = await invoke("update_research_paper", { projectId, goal, allResults, visualizations });
+  //     console.log("✅ Backend research paper updated successfully");
+  //     return result;
+  //   } catch (error) {
+  //     console.error("❌ Backend error updating research paper:", error);
+  //     throw error;
+  //   }
+  // }
 }
 
 export const apiService = new ApiService();
