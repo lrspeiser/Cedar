@@ -17,7 +17,7 @@ interface ImagesTabProps {
   onImagesUpdate: (images: Visualization[]) => void;
 }
 
-export const ImagesTab: React.FC<ImagesTabProps> = ({ projectId, images, onImagesUpdate }) => {
+const ImagesTab: React.FC<ImagesTabProps> = ({ projectId, images, onImagesUpdate }) => {
   const [newImageName, setNewImageName] = useState('');
   const [newImageData, setNewImageData] = useState('');
   const [showCreateForm, setShowCreateForm] = useState(false);
@@ -227,4 +227,6 @@ export const ImagesTab: React.FC<ImagesTabProps> = ({ projectId, images, onImage
       )}
     </div>
   );
-}; 
+};
+
+export default ImagesTab; 

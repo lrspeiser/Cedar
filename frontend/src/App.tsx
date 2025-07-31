@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { apiService } from './api';
 import { ProjectManager } from './components/ProjectManager';
-import { ProjectView } from './components/ProjectView';
+import ProjectView from './components/ProjectView';
 
 interface Project {
   id: string;
@@ -15,16 +15,65 @@ interface Project {
   write_up: string;
 }
 
+// Error Boundary Component
+class ErrorBoundary extends React.Component<
+  { children: React.ReactNode },
+  { hasError: boolean; error?: Error }
+> {
+  constructor(props: { children: React.ReactNode }) {
+    super(props);
+    this.state = { hasError: false };
+  }
+
+  static getDerivedStateFromError(error: Error) {
+    return { hasError: true, error };
+  }
+
+  componentDidCatch(error: Error, errorInfo: React.ErrorInfo) {
+    console.error('React Error Boundary caught an error:', error, errorInfo);
+  }
+
+  render() {
+    if (this.state.hasError) {
+      return (
+        <div className="min-h-screen bg-red-50 flex items-center justify-center p-8">
+          <div className="max-w-md w-full bg-white rounded-lg shadow-lg p-6">
+            <h1 className="text-xl font-bold text-red-800 mb-4">Application Error</h1>
+            <p className="text-red-600 mb-4">
+              Something went wrong with the application. Please check the console for details.
+            </p>
+            <pre className="text-xs text-red-500 bg-red-50 p-2 rounded overflow-auto">
+              {this.state.error?.toString()}
+            </pre>
+            <button
+              onClick={() => window.location.reload()}
+              className="mt-4 px-4 py-2 bg-red-600 text-white rounded hover:bg-red-700"
+            >
+              Reload Application
+            </button>
+          </div>
+        </div>
+      );
+    }
+
+    return this.props.children;
+  }
+}
+
 function App() {
   const [apiKeySet, setApiKeySet] = useState<boolean>(false);
   const [showApiKeySetup, setShowApiKeySetup] = useState<boolean>(true);
   const [apiKey, setApiKey] = useState<string>('');
   const [isSettingApiKey, setIsSettingApiKey] = useState<boolean>(false);
   const [currentProject, setCurrentProject] = useState<Project | null>(null);
+  const [appError, setAppError] = useState<string | null>(null);
 
   useEffect(() => {
     console.log('🚀 App starting up, checking API key status...');
-    checkApiKeyStatus();
+    checkApiKeyStatus().catch(error => {
+      console.error('❌ Error in checkApiKeyStatus:', error);
+      setAppError(error.toString());
+    });
   }, []);
 
   const checkApiKeyStatus = async () => {
@@ -39,6 +88,7 @@ function App() {
       console.error('❌ Error checking API key status:', error);
       setApiKeySet(false);
       setShowApiKeySetup(true);
+      throw error; // Re-throw to be caught by the error boundary
     }
   };
 
@@ -79,6 +129,29 @@ function App() {
   const handleBackToProjects = () => {
     setCurrentProject(null);
   };
+
+  // Error Display
+  if (appError) {
+    return (
+      <div className="min-h-screen bg-red-50 flex items-center justify-center p-8">
+        <div className="max-w-md w-full bg-white rounded-lg shadow-lg p-6">
+          <h1 className="text-xl font-bold text-red-800 mb-4">Connection Error</h1>
+          <p className="text-red-600 mb-4">
+            Unable to connect to the backend. Please restart the application.
+          </p>
+          <pre className="text-xs text-red-500 bg-red-50 p-2 rounded overflow-auto">
+            {appError}
+          </pre>
+          <button
+            onClick={() => window.location.reload()}
+            className="mt-4 px-4 py-2 bg-red-600 text-white rounded hover:bg-red-700"
+          >
+            Retry
+          </button>
+        </div>
+      </div>
+    );
+  }
 
   // API Key Setup Screen
   if (showApiKeySetup) {
@@ -195,4 +268,5 @@ function App() {
   );
 }
 
+export { ErrorBoundary };
 export default App;

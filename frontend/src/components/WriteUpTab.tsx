@@ -7,7 +7,7 @@ interface WriteUpTabProps {
   onWriteUpUpdate: (writeUp: string) => void;
 }
 
-export const WriteUpTab: React.FC<WriteUpTabProps> = ({ projectId, writeUp, onWriteUpUpdate }) => {
+const WriteUpTab: React.FC<WriteUpTabProps> = ({ projectId, writeUp, onWriteUpUpdate }) => {
   const [content, setContent] = useState(writeUp);
   const [isEditing, setIsEditing] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -147,4 +147,6 @@ export const WriteUpTab: React.FC<WriteUpTabProps> = ({ projectId, writeUp, onWr
       )}
     </div>
   );
-}; 
+};
+
+export default WriteUpTab; 

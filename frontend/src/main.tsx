@@ -1,6 +1,6 @@
 import React from 'react'
 import ReactDOM from 'react-dom/client'
-import App from './App.tsx'
+import App, { ErrorBoundary } from './App.tsx'
 import './index.css'
 
 // Set up comprehensive logging to files
@@ -19,21 +19,13 @@ const setupLogging = () => {
     
     const logEntry = `[${timestamp}] [${level}] ${message}\n`;
     
-    // Try to save to a file using Tauri API if available
+    // Simple localStorage logging to avoid file download issues
     try {
-      // Create a blob and download it as a fallback
-      const blob = new Blob([logEntry], { type: 'text/plain' });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `cedar-frontend-${level}-${Date.now()}.log`;
-      a.click();
-      URL.revokeObjectURL(url);
-    } catch (e) {
-      // Fallback to localStorage
       const logs = JSON.parse(localStorage.getItem('cedar-logs') || '[]');
       logs.push({ timestamp, level, message });
       localStorage.setItem('cedar-logs', JSON.stringify(logs.slice(-1000))); // Keep last 1000 logs
+    } catch (e) {
+      // If localStorage fails, just continue without logging
     }
   };
 
@@ -84,6 +76,8 @@ setupLogging();
 
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>
-    <App />
+    <ErrorBoundary>
+      <App />
+    </ErrorBoundary>
   </React.StrictMode>,
 ) 

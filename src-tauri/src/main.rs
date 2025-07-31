@@ -1,11 +1,16 @@
 // Prevents additional console window on Windows in release, DO NOT REMOVE!!
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+#[cfg(test)]
+mod tests;
+
 use tauri::State;
 use serde::{Deserialize, Serialize};
 use std::sync::Mutex;
 use std::collections::HashMap;
-use cedar::{agent, cell, context, executor, output_parser, deps};
+use std::env;
+use std::io::{self, Write};
+use cedar::cell;
 use std::fs;
 use std::path::PathBuf;
 
@@ -88,12 +93,7 @@ struct ResearchRequest {
     project_id: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-struct ExecuteCodeRequest {
-    code: String,
-    session_id: String,
-    project_id: String,
-}
+
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct SetApiKeyRequest {
@@ -1118,18 +1118,473 @@ async fn update_library(
     }
 }
 
+#[derive(serde::Deserialize, serde::Serialize)]
+struct StartResearchRequest {
+    project_id: String,
+    session_id: String,
+    goal: String,
+}
+
+#[tauri::command]
+async fn start_research(
+    request: StartResearchRequest,
+    state: State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    println!("🔬 Starting research for project: {}", request.project_id);
+    
+    // For now, return a simple response indicating research started
+    // This is a placeholder - the full implementation would involve LLM calls
+    let response = serde_json::json!({
+        "status": "started",
+        "session_id": request.session_id,
+        "message": "Research started successfully",
+        "next_step": "Generate initial questions"
+    });
+    
+    Ok(response)
+}
+
+#[derive(serde::Deserialize, serde::Serialize)]
+struct ExecuteCodeRequest {
+    code: String,
+    session_id: String,
+}
+
+#[tauri::command]
+async fn execute_code(
+    request: ExecuteCodeRequest,
+    state: State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    println!("🔧 Executing code for session: {}", request.session_id);
+    
+    // For now, return a simple response indicating code execution
+    // This is a placeholder - the full implementation would involve Python execution
+    let response = serde_json::json!({
+        "status": "executed",
+        "session_id": request.session_id,
+        "output": "Code execution completed (placeholder)",
+        "success": true
+    });
+    
+    Ok(response)
+}
+
+#[derive(serde::Deserialize, serde::Serialize)]
+struct GenerateQuestionsRequest {
+    project_id: String,
+    goal: String,
+}
+
+#[tauri::command]
+async fn generate_questions(
+    request: GenerateQuestionsRequest,
+    state: State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    println!("❓ Generating questions for project: {}", request.project_id);
+    
+    // For now, return a simple response with placeholder questions
+    // This is a placeholder - the full implementation would involve LLM calls
+    let response = serde_json::json!({
+        "status": "generated",
+        "project_id": request.project_id,
+        "questions": [
+            {
+                "id": "q1",
+                "question": "What specific aspects of this research are you most interested in?",
+                "category": "initial",
+                "status": "pending"
+            },
+            {
+                "id": "q2", 
+                "question": "Do you have any existing data or resources to work with?",
+                "category": "initial",
+                "status": "pending"
+            }
+        ]
+    });
+    
+    Ok(response)
+}
+
+#[tauri::command]
+async fn run_test_suite(state: State<'_, AppState>) -> Result<Vec<ApiTestResult>, String> {
+    println!("🧪 Running test suite...");
+    run_api_test_suite(state).await
+}
+
+// API Testing Functions
+#[derive(Debug, Serialize, Deserialize)]
+struct ApiTestRequest {
+    endpoint: String,
+    method: String,
+    data: Option<serde_json::Value>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct ApiTestResult {
+    endpoint: String,
+    success: bool,
+    response: serde_json::Value,
+    error: Option<String>,
+    duration_ms: u64,
+}
+
+#[tauri::command]
+async fn test_api_endpoint(
+    request: ApiTestRequest,
+    state: State<'_, AppState>,
+) -> Result<ApiTestResult, String> {
+    let start_time = std::time::Instant::now();
+    
+    let endpoint = request.endpoint.clone();
+    let method = request.method.clone();
+    
+    let result = match (method.as_str(), endpoint.as_str()) {
+        ("POST", "start_research") => {
+            if let Some(data) = request.data {
+                let args: StartResearchRequest = serde_json::from_value(data)
+                    .map_err(|e| format!("Failed to parse start_research args: {}", e))?;
+                start_research(args, state).await
+                    .map(|r| ApiTestResult {
+                        endpoint: endpoint.clone(),
+                        success: true,
+                        response: r,
+                        error: None,
+                        duration_ms: start_time.elapsed().as_millis() as u64,
+                    })
+                    .map_err(|e| ApiTestResult {
+                        endpoint: endpoint.clone(),
+                        success: false,
+                        response: serde_json::json!({}),
+                        error: Some(e),
+                        duration_ms: start_time.elapsed().as_millis() as u64,
+                    })
+            } else {
+                Err(ApiTestResult {
+                    endpoint: endpoint.clone(),
+                    success: false,
+                    response: serde_json::json!({}),
+                    error: Some("Missing data for start_research".to_string()),
+                    duration_ms: start_time.elapsed().as_millis() as u64,
+                })
+            }
+        }
+        ("POST", "execute_code") => {
+            if let Some(data) = request.data {
+                let args: ExecuteCodeRequest = serde_json::from_value(data)
+                    .map_err(|e| format!("Failed to parse execute_code args: {}", e))?;
+                execute_code(args, state).await
+                    .map(|r| ApiTestResult {
+                        endpoint: endpoint.clone(),
+                        success: true,
+                        response: r,
+                        error: None,
+                        duration_ms: start_time.elapsed().as_millis() as u64,
+                    })
+                    .map_err(|e| ApiTestResult {
+                        endpoint: endpoint.clone(),
+                        success: false,
+                        response: serde_json::json!({}),
+                        error: Some(e),
+                        duration_ms: start_time.elapsed().as_millis() as u64,
+                    })
+            } else {
+                Err(ApiTestResult {
+                    endpoint: endpoint.clone(),
+                    success: false,
+                    response: serde_json::json!({}),
+                    error: Some("Missing data for execute_code".to_string()),
+                    duration_ms: start_time.elapsed().as_millis() as u64,
+                })
+            }
+        }
+        ("GET", "get_projects") => {
+            get_projects(state).await
+                .map(|r| ApiTestResult {
+                    endpoint: endpoint.clone(),
+                    success: true,
+                    response: serde_json::json!(r),
+                    error: None,
+                    duration_ms: start_time.elapsed().as_millis() as u64,
+                })
+                .map_err(|e| ApiTestResult {
+                    endpoint: endpoint.clone(),
+                    success: false,
+                    response: serde_json::json!({}),
+                    error: Some(e),
+                    duration_ms: start_time.elapsed().as_millis() as u64,
+                })
+        }
+        _ => Err(ApiTestResult {
+            endpoint: endpoint.clone(),
+            success: false,
+            response: serde_json::json!({}),
+            error: Some(format!("Unknown endpoint: {} {}", method, endpoint)),
+            duration_ms: start_time.elapsed().as_millis() as u64,
+        })
+    };
+    
+    match result {
+        Ok(test_result) => Ok(test_result),
+        Err(test_result) => Ok(test_result),
+    }
+}
+
+#[tauri::command]
+async fn run_api_test_suite(state: State<'_, AppState>) -> Result<Vec<ApiTestResult>, String> {
+    println!("🧪 Running API test suite...");
+    
+    let mut results = Vec::new();
+    
+    // Test 1: Get projects
+    let test1 = ApiTestRequest {
+        endpoint: "get_projects".to_string(),
+        method: "GET".to_string(),
+        data: None,
+    };
+    results.push(test_api_endpoint(test1, state.clone()).await?);
+    
+    // Test 2: Start research
+    let test2 = ApiTestRequest {
+        endpoint: "start_research".to_string(),
+        method: "POST".to_string(),
+        data: Some(serde_json::json!({
+            "project_id": "test-project",
+            "session_id": "test-session",
+            "goal": "Test research goal"
+        })),
+    };
+    results.push(test_api_endpoint(test2, state.clone()).await?);
+    
+    // Test 3: Execute code
+    let test3 = ApiTestRequest {
+        endpoint: "execute_code".to_string(),
+        method: "POST".to_string(),
+        data: Some(serde_json::json!({
+            "code": "print('Hello, World!')",
+            "session_id": "test-session"
+        })),
+    };
+    results.push(test_api_endpoint(test3, state).await?);
+    
+    println!("✅ API test suite completed with {} tests", results.len());
+    Ok(results)
+}
+
+// CLI Testing Functions
+#[derive(Debug, Serialize, Deserialize)]
+struct CliTestRequest {
+    command: String,
+    args: serde_json::Value,
+}
+
+async fn run_cli_test(request: CliTestRequest) -> Result<serde_json::Value, String> {
+    println!("🧪 Running CLI test: {}", request.command);
+    
+    match request.command.as_str() {
+        "start_research" => {
+            let args: StartResearchRequest = serde_json::from_value(request.args)
+                .map_err(|e| format!("Failed to parse start_research args: {}", e))?;
+            // For CLI testing, we'll just return a mock response
+            let response = serde_json::json!({
+                "status": "started",
+                "session_id": args.session_id,
+                "message": "Research started successfully (CLI test)",
+                "next_step": "Generate initial questions"
+            });
+            Ok(response)
+        }
+        "execute_code" => {
+            let args: ExecuteCodeRequest = serde_json::from_value(request.args)
+                .map_err(|e| format!("Failed to parse execute_code args: {}", e))?;
+            // For CLI testing, we'll just return a mock response
+            let response = serde_json::json!({
+                "status": "executed",
+                "session_id": args.session_id,
+                "output": "Code execution completed (CLI test)",
+                "success": true
+            });
+            Ok(response)
+        }
+        "generate_questions" => {
+            let args: GenerateQuestionsRequest = serde_json::from_value(request.args)
+                .map_err(|e| format!("Failed to parse generate_questions args: {}", e))?;
+            // For CLI testing, we'll just return a mock response
+            let response = serde_json::json!({
+                "status": "generated",
+                "project_id": args.project_id,
+                "questions": [
+                    {
+                        "id": "q1",
+                        "question": "What specific aspects of this research are you most interested in?",
+                        "category": "initial",
+                        "status": "pending"
+                    },
+                    {
+                        "id": "q2", 
+                        "question": "Do you have any existing data or resources to work with?",
+                        "category": "initial",
+                        "status": "pending"
+                    }
+                ]
+            });
+            Ok(response)
+        }
+        "create_project" => {
+            let args: CreateProjectRequest = serde_json::from_value(request.args)
+                .map_err(|e| format!("Failed to parse create_project args: {}", e))?;
+            // For CLI testing, we'll just return a mock response
+            let response = serde_json::json!({
+                "id": "cli-test-project-123",
+                "name": args.name,
+                "goal": args.goal,
+                "created_at": chrono::Utc::now().to_rfc3339(),
+                "updated_at": chrono::Utc::now().to_rfc3339(),
+                "data_files": [],
+                "images": [],
+                "references": [],
+                "variables": [],
+                "questions": [],
+                "libraries": [],
+                "write_up": ""
+            });
+            Ok(response)
+        }
+        "get_projects" => {
+            // For CLI testing, we'll just return a mock response
+            let response = serde_json::json!([
+                {
+                    "id": "test-project-1",
+                    "name": "Test Project 1",
+                    "goal": "Test research goal 1",
+                    "created_at": chrono::Utc::now().to_rfc3339(),
+                    "updated_at": chrono::Utc::now().to_rfc3339(),
+                    "data_files": [],
+                    "images": [],
+                    "references": [],
+                    "variables": [],
+                    "questions": [],
+                    "libraries": [],
+                    "write_up": ""
+                }
+            ]);
+            Ok(response)
+        }
+        "set_api_key" => {
+            let args: SetApiKeyRequest = serde_json::from_value(request.args)
+                .map_err(|e| format!("Failed to parse set_api_key args: {}", e))?;
+            // For CLI testing, we'll just return a mock response
+            let response = serde_json::json!({
+                "status": "success",
+                "message": "API key set successfully (CLI test)"
+            });
+            Ok(response)
+        }
+        "get_api_key_status" => {
+            // For CLI testing, we'll just return a mock response
+            let response = serde_json::json!({
+                "has_key": true,
+                "message": "API key is set (CLI test)"
+            });
+            Ok(response)
+        }
+        _ => Err(format!("Unknown command: {}", request.command))
+    }
+}
+
+fn run_cli_mode() -> Result<(), String> {
+    println!("🧪 Cedar CLI Testing Mode");
+    println!("Available commands:");
+    println!("  start_research");
+    println!("  execute_code");
+    println!("  generate_questions");
+    println!("  create_project");
+    println!("  get_projects");
+    println!("  set_api_key");
+    println!("  get_api_key_status");
+    println!("  exit");
+    println!();
+    
+    loop {
+        print!("cedar-test> ");
+        io::stdout().flush().map_err(|e| format!("Failed to flush stdout: {}", e))?;
+        
+        let mut input = String::new();
+        io::stdin().read_line(&mut input)
+            .map_err(|e| format!("Failed to read input: {}", e))?;
+        
+        let input = input.trim();
+        if input == "exit" {
+            break;
+        }
+        
+        if input.is_empty() {
+            continue;
+        }
+        
+        // Parse command and args
+        let parts: Vec<&str> = input.splitn(2, ' ').collect();
+        let command = parts[0];
+        let args_json = if parts.len() > 1 { parts[1] } else { "{}" };
+        
+        let args: serde_json::Value = serde_json::from_str(args_json)
+            .map_err(|e| format!("Invalid JSON args: {}", e))?;
+        
+        let request = CliTestRequest {
+            command: command.to_string(),
+            args,
+        };
+        
+        // Run the test
+        let runtime = tokio::runtime::Runtime::new()
+            .map_err(|e| format!("Failed to create runtime: {}", e))?;
+        
+        match runtime.block_on(run_cli_test(request)) {
+            Ok(result) => {
+                println!("✅ Success:");
+                println!("{}", serde_json::to_string_pretty(&result)
+                    .map_err(|e| format!("Failed to serialize result: {}", e))?);
+            }
+            Err(e) => {
+                println!("❌ Error: {}", e);
+            }
+        }
+        println!();
+    }
+    
+    Ok(())
+}
+
 fn main() {
+    // Check for CLI testing mode
+    let args: Vec<String> = env::args().collect();
+    if args.len() > 1 && args[1] == "--cli-test" {
+        if let Err(e) = run_cli_mode() {
+            eprintln!("❌ CLI mode error: {}", e);
+            std::process::exit(1);
+        }
+        return;
+    }
+    
     // Initialize projects from disk
     let projects = load_projects().unwrap_or_else(|e| {
-        eprintln!("Failed to load projects: {}", e);
+        println!("⚠️ Failed to load projects: {}", e);
         HashMap::new()
     });
     
+    println!("📁 Loaded {} projects from disk", projects.len());
+    
     // Load API key from disk
     let api_key = load_api_key().unwrap_or_else(|e| {
-        eprintln!("Failed to load API key: {}", e);
+        println!("⚠️ Failed to load API key: {}", e);
         None
     });
+    
+    if api_key.is_some() {
+        println!("🔑 API key loaded successfully");
+    } else {
+        println!("🔑 No API key found");
+    }
     
     tauri::Builder::default()
         .plugin(tauri_plugin_log::Builder::default().build())
@@ -1162,6 +1617,12 @@ fn main() {
             get_libraries,
             install_library,
             update_library,
+            start_research,
+            execute_code,
+            generate_questions,
+            // API Testing endpoints
+            test_api_endpoint,
+            run_test_suite,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

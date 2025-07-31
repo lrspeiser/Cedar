@@ -211,9 +211,8 @@ const ResearchSession: React.FC<ResearchSessionProps> = ({
   const executeCode = async (code: string) => {
     try {
       const result = await apiService.executeCode({
-        projectId,
-        sessionId,
-        code
+        code,
+        sessionId
       });
 
       // Add the result as a new cell

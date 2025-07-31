@@ -7,7 +7,7 @@ interface DataTabProps {
   onDataFilesUpdate: (files: string[]) => void;
 }
 
-export const DataTab: React.FC<DataTabProps> = ({ projectId, dataFiles, onDataFilesUpdate }) => {
+const DataTab: React.FC<DataTabProps> = ({ projectId, dataFiles, onDataFilesUpdate }) => {
   const [newFileName, setNewFileName] = useState('');
   const [newFileContent, setNewFileContent] = useState('');
   const [showCreateForm, setShowCreateForm] = useState(false);
@@ -136,4 +136,6 @@ export const DataTab: React.FC<DataTabProps> = ({ projectId, dataFiles, onDataFi
       )}
     </div>
   );
-}; 
+};
+
+export default DataTab; 

@@ -16,7 +16,7 @@ interface ReferencesTabProps {
   onReferencesUpdate: (references: Reference[]) => void;
 }
 
-export const ReferencesTab: React.FC<ReferencesTabProps> = ({ projectId, references, onReferencesUpdate }) => {
+const ReferencesTab: React.FC<ReferencesTabProps> = ({ projectId, references, onReferencesUpdate }) => {
   const [showCreateForm, setShowCreateForm] = useState(false);
   const [loading, setLoading] = useState(false);
   const [newReference, setNewReference] = useState({
@@ -191,4 +191,6 @@ export const ReferencesTab: React.FC<ReferencesTabProps> = ({ projectId, referen
       )}
     </div>
   );
-}; 
+};
+
+export default ReferencesTab; 

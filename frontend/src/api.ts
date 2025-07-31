@@ -4,22 +4,16 @@ import { invoke } from "@tauri-apps/api/core";
 
 // Add logging function to save logs to files
 export const saveLogToFile = async (level: string, message: string) => {
+  // Simple localStorage logging to avoid Tauri API issues during startup
   try {
     const timestamp = new Date().toISOString();
-    const logEntry = `[${timestamp}] [${level}] ${message}\n`;
+    const logEntry = `[${timestamp}] [${level}] ${message}`;
     
-    // Save to a log file in the project directory
-    await invoke("save_file", {
-      request: {
-        project_id: "system",
-        filename: `cedar-frontend-${level.toLowerCase()}.log`,
-        content: logEntry,
-        file_type: "log"
-      }
-    });
+    const logs = JSON.parse(localStorage.getItem('cedar-api-logs') || '[]');
+    logs.push({ timestamp, level, message: logEntry });
+    localStorage.setItem('cedar-api-logs', JSON.stringify(logs.slice(-1000)));
   } catch (error) {
-    // Fallback to console if Tauri API is not available
-    console.error("Failed to save log to file:", error);
+    // If logging fails, just continue
   }
 };
 
@@ -417,6 +411,42 @@ class ApiService {
     }
   }
 
+  async startResearch(request: { projectId: string; sessionId: string; goal: string }) {
+    console.log('🔧 Calling Tauri backend: start_research', request);
+    try {
+      const result = await invoke('start_research', request);
+      console.log('✅ Backend research started successfully');
+      return result;
+    } catch (error) {
+      console.error('❌ Backend error starting research:', error);
+      throw error;
+    }
+  }
+
+  async executeCode(request: { code: string; sessionId: string }) {
+    console.log('🔧 Calling Tauri backend: execute_code', request);
+    try {
+      const result = await invoke('execute_code', request);
+      console.log('✅ Backend code executed successfully');
+      return result;
+    } catch (error) {
+      console.error('❌ Backend error executing code:', error);
+      throw error;
+    }
+  }
+
+  async generateQuestions(request: { projectId: string; goal: string }) {
+    console.log('🔧 Calling Tauri backend: generate_questions', request);
+    try {
+      const result = await invoke('generate_questions', request);
+      console.log('✅ Backend questions generated successfully');
+      return result;
+    } catch (error) {
+      console.error('❌ Backend error generating questions:', error);
+      throw error;
+    }
+  }
+
   // async extractLibrariesFromCode(projectId: string, code: string, cellId: string) {
   //   console.log("🔧 Calling Tauri backend: extract_libraries_from_code", { projectId, codeLength: code.length, cellId });
   //   try {
@@ -464,6 +494,31 @@ class ApiService {
   //     throw error;
   //   }
   // }
+
+  // API Testing Functions
+  async testApiEndpoint(request: { endpoint: string; method: string; data?: any }) {
+    console.log('🧪 Testing API endpoint:', request);
+    try {
+      const result = await invoke('test_api_endpoint', request);
+      console.log('✅ API test completed');
+      return result;
+    } catch (error) {
+      console.error('❌ API test failed:', error);
+      throw error;
+    }
+  }
+
+  async runApiTestSuite() {
+    console.log('🧪 Running API test suite...');
+    try {
+      const result = await invoke('run_test_suite');
+      console.log('✅ API test suite completed');
+      return result;
+    } catch (error) {
+      console.error('❌ API test suite failed:', error);
+      throw error;
+    }
+  }
 }
 
 export const apiService = new ApiService();
