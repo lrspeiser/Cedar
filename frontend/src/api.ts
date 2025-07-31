@@ -1,6 +1,6 @@
 // API service for communicating with the Tauri backend
 
-import { invoke } from '@tauri-apps/api/core'
+import { invoke } from "@tauri-apps/api/core";
 
 export interface ResearchRequest {
   goal: string
@@ -42,73 +42,112 @@ export interface SetApiKeyRequest {
 }
 
 class ApiService {
-  async setApiKey(apiKey: string): Promise<void> {
+  async setApiKey(apiKey: string) {
+    console.log("🔧 Calling Tauri backend: set_api_key", { apiKeyLength: apiKey.length, apiKeyPrefix: apiKey.substring(0, 10) + "..." });
     try {
-      console.log('🔧 Calling Tauri backend: set_api_key', { 
-        apiKeyLength: apiKey.length, 
-        apiKeyPrefix: apiKey.substring(0, 10) + '...' 
-      })
-      
-      await invoke('set_api_key', { request: { api_key: apiKey } })
-      
-      console.log('✅ Backend response: API key stored successfully')
+      await invoke("set_api_key", { request: { api_key: apiKey } });
+      console.log("✅ Backend API key set successfully");
     } catch (error) {
-      console.error('❌ Backend error setting API key:', error)
-      throw error
+      console.error("❌ Backend error setting API key:", error);
+      throw error;
     }
   }
 
-  async getApiKeyStatus(): Promise<boolean> {
+  async getApiKeyStatus() {
+    console.log("🔧 Checking API key status from backend...");
     try {
-      console.log('🔧 Checking API key status from backend...')
-      const response = await invoke('get_api_key_status')
-      const hasApiKey = response as boolean
-      console.log('✅ Backend API key status:', hasApiKey ? 'API key found' : 'No API key found')
-      return hasApiKey
+      const status = await invoke("get_api_key_status");
+      console.log("✅ Backend API key status:", status);
+      return status;
     } catch (error) {
-      console.error('❌ Backend error getting API key status:', error)
-      throw error
+      console.error("❌ Backend error checking API key status:", error);
+      throw error;
     }
   }
 
-  async startResearch(request: ResearchRequest): Promise<ResearchResponse> {
+  async startResearch(request: { goal: string; session_id?: string; project_id?: string }) {
+    console.log("🔧 Calling Tauri backend: start_research", { goal: request.goal, session_id: request.session_id, project_id: request.project_id });
     try {
-      const response = await invoke('start_research', { request })
-      return response as ResearchResponse
+      const result = await invoke("start_research", { request });
+      console.log("✅ Backend research started successfully");
+      return result;
     } catch (error) {
-      console.error('Error starting research:', error)
-      throw error
+      console.error("❌ Backend error starting research:", error);
+      throw error;
     }
   }
 
-  async executeCode(request: ExecuteCodeRequest): Promise<ExecuteCodeResponse> {
+  async executeCode(request: { code: string; session_id: string; project_id: string }) {
+    console.log("🔧 Calling Tauri backend: execute_code", { codeLength: request.code.length, session_id: request.session_id, project_id: request.project_id });
     try {
-      const response = await invoke('execute_code', { request })
-      return response as ExecuteCodeResponse
+      const result = await invoke("execute_code", { request });
+      console.log("✅ Backend code executed successfully");
+      return result;
     } catch (error) {
-      console.error('Error executing code:', error)
-      throw error
+      console.error("❌ Backend error executing code:", error);
+      throw error;
     }
   }
 
-  async saveSession(sessionId: string, data: any): Promise<void> {
+  async createProject(request: { name: string; goal: string }) {
+    console.log("🔧 Calling Tauri backend: create_project", { name: request.name, goal: request.goal });
     try {
-      await invoke('save_session', { sessionId, data })
-      console.log('Session saved successfully')
+      const result = await invoke("create_project", { request });
+      console.log("✅ Backend project created successfully");
+      return result;
     } catch (error) {
-      console.error('Error saving session:', error)
+      console.error("❌ Backend error creating project:", error);
+      throw error;
     }
   }
 
-  async loadSession(sessionId: string): Promise<any> {
+  async getProjects() {
+    console.log("🔧 Calling Tauri backend: get_projects");
     try {
-      const response = await invoke('load_session', { sessionId })
-      return response
+      const result = await invoke("get_projects");
+      console.log("✅ Backend projects retrieved successfully");
+      return result;
     } catch (error) {
-      console.error('Error loading session:', error)
-      return null
+      console.error("❌ Backend error getting projects:", error);
+      throw error;
+    }
+  }
+
+  async getProject(projectId: string) {
+    console.log("🔧 Calling Tauri backend: get_project", { projectId });
+    try {
+      const result = await invoke("get_project", { project_id: projectId });
+      console.log("✅ Backend project retrieved successfully");
+      return result;
+    } catch (error) {
+      console.error("❌ Backend error getting project:", error);
+      throw error;
+    }
+  }
+
+  async saveFile(request: { project_id: string; filename: string; content: string; file_type: string }) {
+    console.log("🔧 Calling Tauri backend: save_file", { project_id: request.project_id, filename: request.filename, file_type: request.file_type });
+    try {
+      const result = await invoke("save_file", { request });
+      console.log("✅ Backend file saved successfully");
+      return result;
+    } catch (error) {
+      console.error("❌ Backend error saving file:", error);
+      throw error;
+    }
+  }
+
+  async addReference(projectId: string, reference: { id: string; title: string; authors: string; url?: string; content: string; added_at: string }) {
+    console.log("🔧 Calling Tauri backend: add_reference", { projectId, reference });
+    try {
+      const result = await invoke("add_reference", { project_id: projectId, reference });
+      console.log("✅ Backend reference added successfully");
+      return result;
+    } catch (error) {
+      console.error("❌ Backend error adding reference:", error);
+      throw error;
     }
   }
 }
 
-export const apiService = new ApiService()
+export const apiService = new ApiService();

@@ -1,18 +1,27 @@
 import React, { useState, useRef, useEffect } from 'react'
 import { Send, Play, Save, Download, BookOpen, Code, FileText, CheckCircle, AlertCircle } from 'lucide-react'
-import { Cell, ResearchSessionType } from '../App'
 import CellComponent from './CellComponent'
 import ReferencePanel from './ReferencePanel'
 import { cn } from '../lib/utils'
 import { apiService } from '../api'
 
-interface ResearchSessionProps {
-  session: ResearchSessionType
-  onUpdate: (updates: Partial<ResearchSessionType>) => void
+interface Cell {
+  id: string
+  type: 'intent' | 'plan' | 'code' | 'output' | 'reference' | 'validation'
+  content: string
+  metadata?: any
+  timestamp: Date
 }
 
-const ResearchSession: React.FC<ResearchSessionProps> = ({ session, onUpdate }) => {
-  const [goal, setGoal] = useState(session.goal)
+interface ResearchSessionProps {
+  sessionId: string
+  projectId: string
+  goal: string
+}
+
+const ResearchSession: React.FC<ResearchSessionProps> = ({ sessionId, projectId, goal: initialGoal }) => {
+  const [goal, setGoal] = useState(initialGoal)
+  const [cells, setCells] = useState<Cell[]>([])
   const [isExecuting, setIsExecuting] = useState(false)
   const [showReferences, setShowReferences] = useState(false)
   const messagesEndRef = useRef<HTMLDivElement>(null)
@@ -23,13 +32,11 @@ const ResearchSession: React.FC<ResearchSessionProps> = ({ session, onUpdate }) 
 
   useEffect(() => {
     scrollToBottom()
-  }, [session.cells])
+  }, [cells])
 
   const handleSubmitGoal = async () => {
     if (!goal.trim()) return
 
-    onUpdate({ goal, status: 'planning' })
-    
     // Add intent cell
     const intentCell: Cell = {
       id: Date.now().toString(),
@@ -38,10 +45,7 @@ const ResearchSession: React.FC<ResearchSessionProps> = ({ session, onUpdate }) 
       timestamp: new Date()
     }
     
-    onUpdate({
-      cells: [...session.cells, intentCell],
-      status: 'planning'
-    })
+    setCells(prev => [...prev, intentCell])
 
     // Call the real API service
     setIsExecuting(true)
@@ -49,7 +53,8 @@ const ResearchSession: React.FC<ResearchSessionProps> = ({ session, onUpdate }) 
     try {
       const response = await apiService.startResearch({
         goal: goal,
-        session_id: session.id
+        session_id: sessionId,
+        project_id: projectId
       })
       
       // Convert API response cells to our format
@@ -60,10 +65,7 @@ const ResearchSession: React.FC<ResearchSessionProps> = ({ session, onUpdate }) 
         timestamp: new Date(apiCell.timestamp)
       }))
       
-      onUpdate({
-        cells: [...session.cells, intentCell, ...apiCells],
-        status: response.status as any
-      })
+      setCells(prev => [...prev, ...apiCells])
     } catch (error) {
       console.error('Error starting research:', error)
       // Show error to user instead of fallback data
@@ -74,17 +76,14 @@ const ResearchSession: React.FC<ResearchSessionProps> = ({ session, onUpdate }) 
         timestamp: new Date()
       }
       
-      onUpdate({
-        cells: [...session.cells, intentCell, errorCell],
-        status: 'error'
-      })
+      setCells(prev => [...prev, errorCell])
     }
     
     setIsExecuting(false)
   }
 
   const executeCode = async (cellId: string) => {
-    const cell = session.cells.find(c => c.id === cellId)
+    const cell = cells.find(c => c.id === cellId)
     if (!cell || cell.type !== 'code') return
 
     setIsExecuting(true)
@@ -92,7 +91,8 @@ const ResearchSession: React.FC<ResearchSessionProps> = ({ session, onUpdate }) 
     try {
       const response = await apiService.executeCode({
         code: cell.content,
-        session_id: session.id
+        session_id: sessionId,
+        project_id: projectId
       })
       
       // Add output cell
@@ -116,9 +116,7 @@ const ResearchSession: React.FC<ResearchSessionProps> = ({ session, onUpdate }) 
         newCells.push(validationCell)
       }
       
-      onUpdate({
-        cells: [...session.cells, ...newCells]
-      })
+      setCells(prev => [...prev, ...newCells])
     } catch (error) {
       console.error('Error executing code:', error)
       // Show error to user instead of fallback data
@@ -129,9 +127,7 @@ const ResearchSession: React.FC<ResearchSessionProps> = ({ session, onUpdate }) 
         timestamp: new Date()
       }
       
-      onUpdate({
-        cells: [...session.cells, errorCell]
-      })
+      setCells(prev => [...prev, errorCell])
     }
     
     setIsExecuting(false)
@@ -173,7 +169,7 @@ const ResearchSession: React.FC<ResearchSessionProps> = ({ session, onUpdate }) 
         {/* Cells Display */}
         <div className="flex-1 overflow-y-auto p-4">
           <div className="max-w-4xl mx-auto space-y-4">
-            {session.cells.map((cell) => (
+            {cells.map((cell) => (
               <CellComponent
                 key={cell.id}
                 cell={cell}

@@ -6,28 +6,148 @@ use serde::{Deserialize, Serialize};
 use std::sync::Mutex;
 use std::collections::HashMap;
 use cedar::{agent, cell, context, executor, output_parser, deps};
-
-// State to manage research sessions and API key
-struct AppState {
-    sessions: Mutex<HashMap<String, serde_json::Value>>,
-    api_key: Mutex<Option<String>>,
-}
+use std::fs;
+use std::path::PathBuf;
 
 #[derive(Debug, Serialize, Deserialize)]
+struct AppState {
+  sessions: Mutex<HashMap<String, serde_json::Value>>,
+  api_key: Mutex<Option<String>>,
+  projects: Mutex<HashMap<String, Project>>,
+  current_project: Mutex<Option<String>>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct Project {
+    id: String,
+    name: String,
+    goal: String,
+    created_at: String,
+    updated_at: String,
+    data_files: Vec<String>,
+    images: Vec<String>,
+    references: Vec<Reference>,
+    write_up: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct Reference {
+    id: String,
+    title: String,
+    authors: String,
+    url: Option<String>,
+    content: String,
+    added_at: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 struct ResearchRequest {
     goal: String,
     session_id: Option<String>,
+    project_id: Option<String>,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 struct ExecuteCodeRequest {
     code: String,
     session_id: String,
+    project_id: String,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 struct SetApiKeyRequest {
     api_key: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct CreateProjectRequest {
+    name: String,
+    goal: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct SaveFileRequest {
+    project_id: String,
+    filename: String,
+    content: String,
+    file_type: String, // "data", "image", "reference", "write_up"
+}
+
+// File storage functions
+fn get_app_data_dir() -> PathBuf {
+    let mut path = dirs::data_dir().unwrap_or_else(|| PathBuf::from("."));
+    path.push("Cedar");
+    fs::create_dir_all(&path).ok();
+    path
+}
+
+fn get_project_dir(project_id: &str) -> PathBuf {
+    let mut path = get_app_data_dir();
+    path.push("projects");
+    path.push(project_id);
+    fs::create_dir_all(&path).ok();
+    path
+}
+
+fn get_api_key_path() -> PathBuf {
+    let mut path = get_app_data_dir();
+    path.push("api_key.txt");
+    path
+}
+
+fn save_api_key(api_key: &str) -> Result<(), String> {
+    let path = get_api_key_path();
+    fs::write(path, api_key).map_err(|e| format!("Failed to save API key: {}", e))
+}
+
+fn load_api_key() -> Result<Option<String>, String> {
+    let path = get_api_key_path();
+    if path.exists() {
+        fs::read_to_string(path)
+            .map(Some)
+            .map_err(|e| format!("Failed to load API key: {}", e))
+    } else {
+        Ok(None)
+    }
+}
+
+fn save_project(project: &Project) -> Result<(), String> {
+    let project_dir = get_project_dir(&project.id);
+    let project_file = project_dir.join("project.json");
+    
+    let json = serde_json::to_string_pretty(project)
+        .map_err(|e| format!("Failed to serialize project: {}", e))?;
+    
+    fs::write(project_file, json)
+        .map_err(|e| format!("Failed to save project: {}", e))
+}
+
+fn load_projects() -> Result<HashMap<String, Project>, String> {
+    let mut projects = HashMap::new();
+    let projects_dir = get_app_data_dir().join("projects");
+    
+    if !projects_dir.exists() {
+        return Ok(projects);
+    }
+    
+    for entry in fs::read_dir(projects_dir)
+        .map_err(|e| format!("Failed to read projects directory: {}", e))? {
+        let entry = entry.map_err(|e| format!("Failed to read project entry: {}", e))?;
+        let project_dir = entry.path();
+        
+        if project_dir.is_dir() {
+            let project_file = project_dir.join("project.json");
+            if project_file.exists() {
+                let content = fs::read_to_string(&project_file)
+                    .map_err(|e| format!("Failed to read project file: {}", e))?;
+                let project: Project = serde_json::from_str(&content)
+                    .map_err(|e| format!("Failed to parse project: {}", e))?;
+                projects.insert(project.id.clone(), project);
+            }
+        }
+    }
+    
+    Ok(projects)
 }
 
 #[tauri::command]
@@ -37,7 +157,10 @@ async fn set_api_key(
 ) -> Result<(), String> {
     println!("🔧 Backend: Setting API key (length: {})", request.api_key.len());
     
-    // Store the API key in memory (encrypted in production)
+    // Save API key to file
+    save_api_key(&request.api_key)?;
+    
+    // Store the API key in memory
     *state.api_key.lock().unwrap() = Some(request.api_key);
     
     println!("✅ Backend: API key stored successfully");
@@ -250,12 +373,157 @@ async fn load_session(
     Ok(sessions.get(&session_id).cloned())
 }
 
+#[tauri::command]
+async fn create_project(
+    request: CreateProjectRequest,
+    state: State<'_, AppState>,
+) -> Result<Project, String> {
+    println!("📁 Backend: Creating new project: {}", request.name);
+    
+    let project_id = uuid::Uuid::new_v4().to_string();
+    let now = chrono::Utc::now().to_rfc3339();
+    
+    let project = Project {
+        id: project_id.clone(),
+        name: request.name,
+        goal: request.goal,
+        created_at: now.clone(),
+        updated_at: now,
+        data_files: Vec::new(),
+        images: Vec::new(),
+        references: Vec::new(),
+        write_up: String::new(),
+    };
+    
+    // Save project to file
+    save_project(&project)?;
+    
+    // Update state
+    let mut projects_guard = state.projects.lock().unwrap();
+    projects_guard.insert(project_id.clone(), project.clone());
+    
+    println!("✅ Backend: Project created successfully");
+    Ok(project)
+}
+
+#[tauri::command]
+async fn get_projects(
+    state: State<'_, AppState>,
+) -> Result<Vec<Project>, String> {
+    println!("📁 Backend: Getting all projects");
+    
+    let projects_guard = state.projects.lock().unwrap();
+    let projects: Vec<Project> = projects_guard.values().cloned().collect();
+    
+    println!("✅ Backend: Found {} projects", projects.len());
+    Ok(projects)
+}
+
+#[tauri::command]
+async fn get_project(
+    project_id: String,
+    state: State<'_, AppState>,
+) -> Result<Option<Project>, String> {
+    println!("📁 Backend: Getting project: {}", project_id);
+    
+    let projects_guard = state.projects.lock().unwrap();
+    let project = projects_guard.get(&project_id).cloned();
+    
+    println!("✅ Backend: Project found: {}", project.is_some());
+    Ok(project)
+}
+
+#[tauri::command]
+async fn save_file(
+    request: SaveFileRequest,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    println!("💾 Backend: Saving file: {} to project: {}", request.filename, request.project_id);
+    
+    let project_dir = get_project_dir(&request.project_id);
+    let file_path = match request.file_type.as_str() {
+        "data" => project_dir.join("data").join(&request.filename),
+        "image" => project_dir.join("images").join(&request.filename),
+        "write_up" => project_dir.join("write_up.md"),
+        _ => return Err("Invalid file type".to_string()),
+    };
+    
+    // Create directory if it doesn't exist
+    if let Some(parent) = file_path.parent() {
+        fs::create_dir_all(parent)
+            .map_err(|e| format!("Failed to create directory: {}", e))?;
+    }
+    
+    // Save file
+    fs::write(&file_path, &request.content)
+        .map_err(|e| format!("Failed to save file: {}", e))?;
+    
+    // Update project metadata
+    let mut projects_guard = state.projects.lock().unwrap();
+    if let Some(project) = projects_guard.get_mut(&request.project_id) {
+        match request.file_type.as_str() {
+            "data" => {
+                if !project.data_files.contains(&request.filename) {
+                    project.data_files.push(request.filename);
+                }
+            },
+            "image" => {
+                if !project.images.contains(&request.filename) {
+                    project.images.push(request.filename);
+                }
+            },
+            "write_up" => {
+                project.write_up = request.content.clone();
+            },
+            _ => {}
+        }
+        project.updated_at = chrono::Utc::now().to_rfc3339();
+        save_project(project)?;
+    }
+    
+    println!("✅ Backend: File saved successfully");
+    Ok(())
+}
+
+#[tauri::command]
+async fn add_reference(
+    project_id: String,
+    reference: Reference,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    println!("📚 Backend: Adding reference to project: {}", project_id);
+    
+    let mut projects_guard = state.projects.lock().unwrap();
+    if let Some(project) = projects_guard.get_mut(&project_id) {
+        project.references.push(reference);
+        project.updated_at = chrono::Utc::now().to_rfc3339();
+        save_project(project)?;
+    }
+    
+    println!("✅ Backend: Reference added successfully");
+    Ok(())
+}
+
 fn main() {
+    // Initialize projects from disk
+    let projects = load_projects().unwrap_or_else(|e| {
+        eprintln!("Failed to load projects: {}", e);
+        HashMap::new()
+    });
+    
+    // Load API key from disk
+    let api_key = load_api_key().unwrap_or_else(|e| {
+        eprintln!("Failed to load API key: {}", e);
+        None
+    });
+    
     tauri::Builder::default()
         .plugin(tauri_plugin_log::Builder::default().build())
         .manage(AppState {
             sessions: Mutex::new(HashMap::new()),
-            api_key: Mutex::new(None),
+            api_key: Mutex::new(api_key),
+            projects: Mutex::new(projects),
+            current_project: Mutex::new(None),
         })
         .invoke_handler(tauri::generate_handler![
             set_api_key,
@@ -263,7 +531,12 @@ fn main() {
             start_research,
             execute_code,
             save_session,
-            load_session
+            load_session,
+            create_project,
+            get_projects,
+            get_project,
+            save_file,
+            add_reference,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
