@@ -180,7 +180,7 @@ function App() {
         {currentProject ? (
           <ProjectView
             project={currentProject}
-            onProjectUpdate={handleProjectUpdate}
+            onBack={handleBackToProjects}
           />
         ) : (
           <div className="h-full p-6">

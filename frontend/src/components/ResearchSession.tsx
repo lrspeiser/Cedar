@@ -1,273 +1,413 @@
-import React, { useState, useRef, useEffect } from 'react'
-import { Send, Play, Save, Download, BookOpen, Code, FileText, CheckCircle, AlertCircle } from 'lucide-react'
-import CellComponent from './CellComponent'
-import ReferencePanel from './ReferencePanel'
-import { cn } from '../lib/utils'
-import { apiService } from '../api'
+import React, { useState, useEffect } from 'react';
+import { apiService } from '../api';
+import CellComponent from './CellComponent';
 
 interface Cell {
-  id: string
-  type: 'intent' | 'plan' | 'code' | 'output' | 'reference' | 'validation'
-  content: string
-  metadata?: any
-  timestamp: Date
+  type: 'text' | 'code';
+  content: string;
+  timestamp: string;
+  output?: string;
+  validation?: string;
+  status?: string;
 }
 
 interface ResearchSessionProps {
-  sessionId: string
-  projectId: string
-  goal: string
-  onContentGenerated?: () => void
+  sessionId: string;
+  projectId: string;
+  goal: string;
+  onContentGenerated?: () => void;
 }
 
-const ResearchSession: React.FC<ResearchSessionProps> = ({ sessionId, projectId, goal: initialGoal, onContentGenerated }) => {
-  const [goal, setGoal] = useState(initialGoal)
-  const [cells, setCells] = useState<Cell[]>([])
-  const [isExecuting, setIsExecuting] = useState(false)
+const ResearchSession: React.FC<ResearchSessionProps> = ({ 
+  sessionId, 
+  projectId, 
+  goal, 
+  onContentGenerated 
+}) => {
+  const [cells, setCells] = useState<Cell[]>([]);
+  const [currentGoal, setCurrentGoal] = useState(goal);
+  const [isLoading, setIsLoading] = useState(false);
+  const [executionProgress, setExecutionProgress] = useState<{
+    currentStep: number;
+    totalSteps: number;
+    isExecuting: boolean;
+    stepResults: any[];
+    isGeneratingVisualizations: boolean;
+    visualizationProgress: number;
+    totalVisualizations: number;
+    isUpdatingPaper: boolean;
+  }>({
+    currentStep: 0,
+    totalSteps: 0,
+    isExecuting: false,
+    stepResults: [],
+    isGeneratingVisualizations: false,
+    visualizationProgress: 0,
+    totalVisualizations: 0,
+    isUpdatingPaper: false
+  });
 
-  // Load session data on component mount
   useEffect(() => {
-    const loadSessionData = async () => {
-      try {
-        const sessionData = await apiService.loadSession(sessionId)
-        if (sessionData && sessionData.cells) {
-          const loadedCells: Cell[] = sessionData.cells.map((cell: any) => ({
-            id: cell.id,
-            type: cell.type,
-            content: cell.content,
-            metadata: cell.metadata,
-            timestamp: new Date(cell.timestamp)
-          }))
-          setCells(loadedCells)
-          console.log("📂 Frontend: Loaded session with", loadedCells.length, "cells")
-        }
-      } catch (error) {
-        console.log("📂 Frontend: No existing session found, starting fresh")
+    loadSession();
+  }, [sessionId]);
+
+  const loadSession = async () => {
+    try {
+      const sessionData = await apiService.loadSession(sessionId);
+      if (sessionData && sessionData.cells) {
+        setCells(sessionData.cells);
       }
+    } catch (error) {
+      console.error('Failed to load session:', error);
     }
-
-    loadSessionData()
-  }, [sessionId])
-  const [showReferences, setShowReferences] = useState(false)
-  const messagesEndRef = useRef<HTMLDivElement>(null)
-
-  const scrollToBottom = () => {
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" })
-  }
-
-  useEffect(() => {
-    scrollToBottom()
-  }, [cells])
+  };
 
   const handleSubmitGoal = async () => {
-    if (!goal.trim()) return
-
-    // Add intent cell
-    const intentCell: Cell = {
-      id: Date.now().toString(),
-      type: 'intent',
-      content: goal,
-      timestamp: new Date()
-    }
+    if (!currentGoal.trim()) return;
     
-    setCells(prev => [...prev, intentCell])
+    setIsLoading(true);
+    setExecutionProgress({
+      currentStep: 0,
+      totalSteps: 0,
+      isExecuting: true,
+      stepResults: [],
+      isGeneratingVisualizations: false,
+      visualizationProgress: 0,
+      totalVisualizations: 0,
+      isUpdatingPaper: false
+    });
 
-    // Call the real API service
-    setIsExecuting(true)
-    
     try {
       const response = await apiService.startResearch({
-        goal: goal,
-        session_id: sessionId,
-        project_id: projectId
-      })
-      
-      // Convert API response cells to our format
-      const apiCells: Cell[] = response.cells.map(apiCell => ({
-        id: apiCell.id,
-        type: apiCell.type as any,
-        content: apiCell.content,
-        timestamp: new Date(apiCell.timestamp)
-      }))
-      
-      setCells(prev => [...prev, ...apiCells])
-      
-      // Refresh project data to show newly categorized content
-      if (onContentGenerated) {
-        onContentGenerated()
+        projectId,
+        sessionId,
+        goal: currentGoal.trim()
+      });
+
+      if (response.status === 'questions_generated' || response.status === 'questions_pending') {
+        // Show message to go to Questions tab
+        setCells([{
+          type: 'text',
+          content: `## Research Setup Required\n\n${response.message}\n\nPlease go to the **Questions** tab to answer the clarifying questions before research can begin.`,
+          timestamp: new Date().toISOString()
+        }]);
+      } else if (response.cells) {
+        // Research started and cells were generated
+        setCells(response.cells);
+        
+        // Start monitoring execution progress
+        monitorExecutionProgress();
       }
     } catch (error) {
-      console.error('Error starting research:', error)
-      // Show error to user instead of fallback data
-      const errorCell: Cell = {
-        id: Date.now().toString(),
-        type: 'output',
-        content: `Error: ${error instanceof Error ? error.message : 'Failed to start research'}`,
-        timestamp: new Date()
-      }
-      
-      setCells(prev => [...prev, errorCell])
+      console.error('Failed to start research:', error);
+      setCells([{
+        type: 'text',
+        content: `## Error Starting Research\n\nFailed to start research: ${error}`,
+        timestamp: new Date().toISOString()
+      }]);
+    } finally {
+      setIsLoading(false);
     }
-    
-    setIsExecuting(false)
-  }
+  };
 
-  const executeCode = async (cellId: string) => {
-    const cell = cells.find(c => c.id === cellId)
-    if (!cell || cell.type !== 'code') return
-
-    setIsExecuting(true)
-    
-    try {
-      const response = await apiService.executeCode({
-        code: cell.content,
-        session_id: sessionId,
-        project_id: projectId
-      })
-      
-      // Add output cell
-      const outputCell: Cell = {
-        id: Date.now().toString(),
-        type: 'output',
-        content: response.output,
-        timestamp: new Date()
-      }
-      
-      // Add validation cell if validation data exists
-      const newCells: Cell[] = [outputCell]
-      
-      if (response.validation) {
-        const validationCell: Cell = {
-          id: (Date.now() + 1).toString(),
-          type: 'validation',
-          content: JSON.stringify(response.validation),
-          timestamp: new Date()
+  const monitorExecutionProgress = () => {
+    // Poll for execution updates every 2 seconds
+    const interval = setInterval(async () => {
+      try {
+        // Check if there are any new step results by looking at the session data
+        const sessionData = await apiService.loadSession(sessionId);
+        if (sessionData && sessionData.step_results) {
+          setExecutionProgress(prev => ({
+            ...prev,
+            stepResults: sessionData.step_results || [],
+            currentStep: sessionData.step_results?.length || 0
+          }));
         }
-        newCells.push(validationCell)
+        
+        // Check if execution is complete
+        if (sessionData && sessionData.status === 'completed') {
+          setExecutionProgress(prev => ({
+            ...prev,
+            isExecuting: false
+          }));
+          clearInterval(interval);
+          
+          // Refresh the cells to show final results
+          await loadSession();
+          if (onContentGenerated) {
+            onContentGenerated();
+          }
+        } else if (sessionData && (sessionData.status === 'completed_with_visualizations' || sessionData.status === 'completed_without_visualizations')) {
+          // Research completed, check if visualizations were generated
+          if (sessionData.visualizations) {
+            setExecutionProgress(prev => ({
+              ...prev,
+              isExecuting: false,
+              isGeneratingVisualizations: false,
+              totalVisualizations: sessionData.visualizations.length
+            }));
+          } else {
+            setExecutionProgress(prev => ({
+              ...prev,
+              isExecuting: false,
+              isGeneratingVisualizations: false
+            }));
+          }
+          clearInterval(interval);
+          
+          // Refresh the cells to show final results
+          await loadSession();
+          if (onContentGenerated) {
+            onContentGenerated();
+          }
+        } else if (sessionData && (sessionData.status === 'completed_with_paper' || sessionData.status === 'completed_without_paper' || sessionData.status === 'completed_with_paper_no_viz' || sessionData.status === 'completed_without_extras')) {
+          // Research completed with paper update
+          setExecutionProgress(prev => ({
+            ...prev,
+            isExecuting: false,
+            isGeneratingVisualizations: false,
+            isUpdatingPaper: false
+          }));
+          clearInterval(interval);
+          
+          // Refresh the cells to show final results
+          await loadSession();
+          if (onContentGenerated) {
+            onContentGenerated();
+          }
+        } else if (sessionData && sessionData.status === 'generating_visualizations') {
+          // Visualization generation in progress
+          setExecutionProgress(prev => ({
+            ...prev,
+            isExecuting: false,
+            isGeneratingVisualizations: true,
+            visualizationProgress: sessionData.visualization_progress || 0,
+            totalVisualizations: sessionData.total_visualizations || 0
+          }));
+        } else if (sessionData && sessionData.status === 'updating_paper') {
+          // Paper update in progress
+          setExecutionProgress(prev => ({
+            ...prev,
+            isExecuting: false,
+            isGeneratingVisualizations: false,
+            isUpdatingPaper: true
+          }));
+        }
+      } catch (error) {
+        console.error('Failed to check execution progress:', error);
       }
+    }, 2000);
+
+    // Cleanup interval after 10 minutes (max execution time)
+    setTimeout(() => {
+      clearInterval(interval);
+      setExecutionProgress(prev => ({
+        ...prev,
+        isExecuting: false
+      }));
+    }, 600000);
+  };
+
+  const executeCode = async (code: string) => {
+    try {
+      const result = await apiService.executeCode({
+        projectId,
+        sessionId,
+        code
+      });
+
+      // Add the result as a new cell
+      const newCell: Cell = {
+        type: 'code',
+        content: code,
+        timestamp: new Date().toISOString(),
+        output: result.output,
+        validation: result.validation,
+        status: result.status
+      };
+
+      setCells(prev => [...prev, newCell]);
+
+      // Save session
+      await apiService.updateSession(sessionId, [...cells, newCell]);
       
-      setCells(prev => [...prev, ...newCells])
-      
-      // Refresh project data to show newly categorized content
       if (onContentGenerated) {
-        onContentGenerated()
+        onContentGenerated();
       }
     } catch (error) {
-      console.error('Error executing code:', error)
-      // Show error to user instead of fallback data
-      const errorCell: Cell = {
-        id: Date.now().toString(),
-        type: 'output',
-        content: `Error: ${error instanceof Error ? error.message : 'Failed to execute code'}`,
-        timestamp: new Date()
-      }
+      console.error('Error executing code:', error);
       
-      setCells(prev => [...prev, errorCell])
-    }
-    
-    setIsExecuting(false)
-  }
+      // Add error cell
+      const errorCell: Cell = {
+        type: 'code',
+        content: code,
+        timestamp: new Date().toISOString(),
+        output: `Error: ${error}`,
+        status: 'failed'
+      };
 
-  const addReference = () => {
-    // This function is removed as it was creating mock data
-    // References should come from the real backend research process
-  }
+      setCells(prev => [...prev, errorCell]);
+    }
+  };
 
   return (
-    <div className="h-full flex">
-      {/* Main Content */}
-      <div className="flex-1 flex flex-col">
-        {/* Goal Input */}
-        <div className="bg-white border-b border-gray-200 p-4">
-          <div className="max-w-4xl mx-auto">
-            <div className="flex space-x-3">
-              <input
-                type="text"
-                value={goal}
-                onChange={(e) => setGoal(e.target.value)}
-                placeholder="What would you like to research? (e.g., 'Find the top 3 product categories associated with churn')"
-                className="flex-1 px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-cedar-500 focus:border-transparent"
-                disabled={isExecuting}
-              />
-              <button
-                onClick={handleSubmitGoal}
-                disabled={!goal.trim() || isExecuting}
-                className="cedar-gradient text-white px-6 py-2 rounded-lg font-medium hover:opacity-90 transition-opacity disabled:opacity-50 disabled:cursor-not-allowed flex items-center space-x-2"
-              >
-                <Send className="h-4 w-4" />
-                <span>Start Research</span>
-              </button>
-            </div>
-          </div>
-        </div>
-
-        {/* Cells Display */}
-        <div className="flex-1 overflow-y-auto p-4">
-          <div className="max-w-4xl mx-auto space-y-4">
-            {cells.map((cell) => (
-              <CellComponent
-                key={cell.id}
-                cell={cell}
-                onExecute={() => executeCode(cell.id)}
-                isExecuting={isExecuting}
-              />
-            ))}
-            
-            {isExecuting && (
-              <div className="flex items-center justify-center py-8">
-                <div className="flex items-center space-x-3 text-cedar-600">
-                  <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-cedar-600"></div>
-                  <span>AI is working on your research...</span>
-                </div>
-              </div>
-            )}
-            
-            <div ref={messagesEndRef} />
-          </div>
-        </div>
-
-        {/* Action Bar */}
-        <div className="bg-white border-t border-gray-200 p-4">
-          <div className="max-w-4xl mx-auto flex items-center justify-between">
-            <div className="flex items-center space-x-2">
-              <button
-                onClick={() => setShowReferences(!showReferences)}
-                className={cn(
-                  "flex items-center space-x-2 px-3 py-2 rounded-lg transition-colors",
-                  showReferences 
-                    ? "bg-cedar-100 text-cedar-700" 
-                    : "text-gray-600 hover:bg-gray-100"
-                )}
-              >
-                <BookOpen className="h-4 w-4" />
-                <span>References</span>
-              </button>
-            </div>
-            
-            <div className="flex items-center space-x-2">
-              <button className="flex items-center space-x-2 px-3 py-2 text-gray-600 hover:bg-gray-100 rounded-lg transition-colors">
-                <Save className="h-4 w-4" />
-                <span>Save</span>
-              </button>
-              
-              <button className="flex items-center space-x-2 px-3 py-2 text-gray-600 hover:bg-gray-100 rounded-lg transition-colors">
-                <Download className="h-4 w-4" />
-                <span>Export</span>
-              </button>
-            </div>
-          </div>
+    <div className="flex-1 overflow-y-auto p-4">
+      {/* Research Goal Input */}
+      <div className="mb-6">
+        <h2 className="text-2xl font-bold text-gray-900 mb-4">Research Session</h2>
+        <div className="flex space-x-4">
+          <input
+            type="text"
+            value={currentGoal}
+            onChange={(e) => setCurrentGoal(e.target.value)}
+            placeholder="Enter your research goal..."
+            className="flex-1 p-3 border border-gray-300 rounded-md focus:ring-2 focus:ring-cedar-500 focus:border-transparent"
+            disabled={isLoading}
+          />
+          <button
+            onClick={handleSubmitGoal}
+            disabled={isLoading || !currentGoal.trim()}
+            className="px-6 py-3 bg-cedar-500 text-white rounded-md hover:bg-cedar-600 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+          >
+            {isLoading ? 'Starting Research...' : 'Start Research'}
+          </button>
         </div>
       </div>
 
-      {/* Reference Panel */}
-      {showReferences && (
-        <ReferencePanel
-          references={session.cells.filter(cell => cell.type === 'reference')}
-          onClose={() => setShowReferences(false)}
-        />
+      {/* Execution Progress */}
+      {executionProgress.isExecuting && (
+        <div className="mb-6 bg-blue-50 border border-blue-200 rounded-lg p-4">
+          <div className="flex items-center justify-between mb-2">
+            <h3 className="text-lg font-medium text-blue-900">Research in Progress</h3>
+            <div className="flex items-center space-x-2">
+              <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-blue-500"></div>
+              <span className="text-sm text-blue-700">Executing steps automatically...</span>
+            </div>
+          </div>
+          
+          {executionProgress.totalSteps > 0 && (
+            <div className="mb-2">
+              <div className="flex justify-between text-sm text-blue-700 mb-1">
+                <span>Step {executionProgress.currentStep + 1} of {executionProgress.totalSteps}</span>
+                <span>{Math.round(((executionProgress.currentStep + 1) / executionProgress.totalSteps) * 100)}%</span>
+              </div>
+              <div className="w-full bg-blue-200 rounded-full h-2">
+                <div 
+                  className="bg-blue-500 h-2 rounded-full transition-all duration-300"
+                  style={{ width: `${((executionProgress.currentStep + 1) / executionProgress.totalSteps) * 100}%` }}
+                ></div>
+              </div>
+            </div>
+          )}
+          
+          {executionProgress.stepResults.length > 0 && (
+            <div className="mt-4">
+              <h4 className="text-sm font-medium text-blue-900 mb-2">Recent Results:</h4>
+              <div className="space-y-2">
+                {executionProgress.stepResults.slice(-3).map((result, index) => (
+                  <div key={index} className="text-sm text-blue-800 bg-blue-100 rounded p-2">
+                    <strong>Step {result.step_number + 1}:</strong> {result.description}
+                    <div className="text-xs text-blue-600 mt-1">
+                      Status: {result.status === 'success' ? '✅ Completed' : '❌ Failed'}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
       )}
-    </div>
-  )
-}
 
-export default ResearchSession 
+      {/* Visualization Generation Progress */}
+      {executionProgress.isGeneratingVisualizations && (
+        <div className="mb-6 bg-purple-50 border border-purple-200 rounded-lg p-4">
+          <div className="flex items-center justify-between mb-2">
+            <h3 className="text-lg font-medium text-purple-900">Generating Visualizations</h3>
+            <div className="flex items-center space-x-2">
+              <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-purple-500"></div>
+              <span className="text-sm text-purple-700">Creating charts and tables...</span>
+            </div>
+          </div>
+          
+          {executionProgress.totalVisualizations > 0 && (
+            <div className="mb-2">
+              <div className="flex justify-between text-sm text-purple-700 mb-1">
+                <span>Visualization {executionProgress.visualizationProgress + 1} of {executionProgress.totalVisualizations}</span>
+                <span>{Math.round(((executionProgress.visualizationProgress + 1) / executionProgress.totalVisualizations) * 100)}%</span>
+              </div>
+              <div className="w-full bg-purple-200 rounded-full h-2">
+                <div 
+                  className="bg-purple-500 h-2 rounded-full transition-all duration-300"
+                  style={{ width: `${((executionProgress.visualizationProgress + 1) / executionProgress.totalVisualizations) * 100}%` }}
+                ></div>
+              </div>
+            </div>
+          )}
+          
+          <div className="mt-4">
+            <h4 className="text-sm font-medium text-purple-900 mb-2">Creating:</h4>
+            <div className="text-sm text-purple-800 bg-purple-100 rounded p-2">
+              <ul className="list-disc list-inside space-y-1">
+                <li>Summary statistics tables</li>
+                <li>Trend charts and graphs</li>
+                <li>Distribution plots</li>
+                <li>Correlation visualizations</li>
+                <li>Key findings summaries</li>
+              </ul>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Paper Update Progress */}
+      {executionProgress.isUpdatingPaper && (
+        <div className="mb-6 bg-green-50 border border-green-200 rounded-lg p-4">
+          <div className="flex items-center justify-between mb-2">
+            <h3 className="text-lg font-medium text-green-900">Updating Research Paper</h3>
+            <div className="flex items-center space-x-2">
+              <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-green-500"></div>
+              <span className="text-sm text-green-700">Synthesizing findings...</span>
+            </div>
+          </div>
+          
+          <div className="mt-4">
+            <h4 className="text-sm font-medium text-green-900 mb-2">Creating comprehensive report:</h4>
+            <div className="text-sm text-green-800 bg-green-100 rounded p-2">
+              <ul className="list-disc list-inside space-y-1">
+                <li>Analyzing all research results and data</li>
+                <li>Incorporating interview questions and answers</li>
+                <li>Integrating visualization findings</li>
+                <li>Structuring academic paper with proper sections</li>
+                <li>Highlighting key insights and conclusions</li>
+                <li>Adding recommendations and implications</li>
+              </ul>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Cells Display */}
+      <div className="space-y-4">
+        {cells.map((cell, index) => (
+          <CellComponent
+            key={index}
+            cell={cell}
+            onExecuteCode={executeCode}
+          />
+        ))}
+        
+        {cells.length === 0 && !isLoading && (
+          <div className="text-center py-12">
+            <div className="text-gray-400 text-6xl mb-4">🔬</div>
+            <h3 className="text-lg font-medium text-gray-900 mb-2">Ready to Research</h3>
+            <p className="text-gray-600">
+              Enter your research goal above to start an automated research session.
+            </p>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+};
+
+export default ResearchSession; 
