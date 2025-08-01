@@ -8,7 +8,8 @@
     "build": "tsc && vite build",
     "lint": "eslint . --ext ts,tsx --report-unused-disable-directives --max-warnings 0",
     "preview": "vite preview",
-    "tauri": "tauri"
+    "tauri": "tauri",
+    "test": "node ../Unit\\ Tests/run-all-tests.js"
   },
   "dependencies": {
     "@tailwindcss/typography": "^0.5.10",

@@ -147,6 +147,8 @@ interface ResearchSessionProps {
   answers?: Record<string, string>;
   onContentGenerated?: () => void;
   onDataRouted?: (result: DataRouterResult) => void;
+  isResearchStarting?: boolean;
+  onSessionLoaded?: () => void;
 }
 
 // Data Router Service
@@ -398,7 +400,9 @@ const ResearchSession: React.FC<ResearchSessionProps> = ({
   sessionId, 
   projectId,
   goal,
-  onDataRouted
+  onDataRouted,
+  isResearchStarting = false,
+  onSessionLoaded
 }) => {
   const [cells, setCells] = useState<Cell[]>([]);
   const [isLoading, setIsLoading] = useState(false);
@@ -455,8 +459,38 @@ const ResearchSession: React.FC<ResearchSessionProps> = ({
   useEffect(() => {
     if (sessionId) {
       loadSession();
+      // Reset loading state when loading a session to prevent stuck states
+      setIsLoading(false);
     }
   }, [sessionId]);
+
+  // Auto-refresh session when research starts
+  useEffect(() => {
+    if (isResearchStarting && sessionId) {
+      // Set a small delay to allow the backend to create the session
+      const timer = setTimeout(() => {
+        loadSession();
+      }, 1000);
+      
+      // Set up polling to check for session updates
+      const pollInterval = setInterval(() => {
+        loadSession();
+      }, 2000); // Check every 2 seconds
+      
+      return () => {
+        clearTimeout(timer);
+        clearInterval(pollInterval);
+      };
+    }
+  }, [isResearchStarting, sessionId]);
+
+  // Stop polling when we have cells (session is loaded)
+  useEffect(() => {
+    if (cells.length > 0 && isResearchStarting && onSessionLoaded) {
+      // Session has been loaded, notify parent to stop the research starting state
+      onSessionLoaded();
+    }
+  }, [cells.length, isResearchStarting, onSessionLoaded]);
 
   // Persist execution threads when component unmounts or session changes
   useEffect(() => {
@@ -630,7 +664,19 @@ const ResearchSession: React.FC<ResearchSessionProps> = ({
   };
 
   const handleNextStep = async (currentCell: Cell) => {
+    // Prevent multiple simultaneous executions
+    if (isLoading) {
+      console.log('Already processing, please wait...');
+      return;
+    }
+    
     setIsLoading(true);
+    
+    // Set a timeout to prevent infinite loading
+    const timeoutId = setTimeout(() => {
+      console.warn('Processing timeout - resetting loading state');
+      setIsLoading(false);
+    }, 30000); // 30 second timeout
     
     try {
       // Route data from current cell before proceeding
@@ -683,7 +729,10 @@ const ResearchSession: React.FC<ResearchSessionProps> = ({
       
     } catch (error) {
       console.error('Error in handleNextStep:', error);
+      // Show error to user
+      alert(`Error processing next step: ${error}`);
     } finally {
+      clearTimeout(timeoutId);
       setIsLoading(false);
     }
   };
@@ -1032,7 +1081,17 @@ const ResearchSession: React.FC<ResearchSessionProps> = ({
       <div className="flex-1 overflow-y-auto p-4 space-y-4">
         {cells.length === 0 ? (
           <div className="text-center py-8">
-            <p className="text-gray-500">No research session started yet.</p>
+            {isResearchStarting ? (
+              <div className="flex flex-col items-center space-y-4">
+                <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-cedar-500"></div>
+                <div className="text-center">
+                  <h3 className="text-lg font-medium text-gray-900 mb-2">Starting Research...</h3>
+                  <p className="text-gray-600">Initializing research session and generating initial content</p>
+                </div>
+              </div>
+            ) : (
+              <p className="text-gray-500">No research session started yet.</p>
+            )}
           </div>
         ) : (
           cells.map((cell) => renderCell(cell))
@@ -1042,6 +1101,15 @@ const ResearchSession: React.FC<ResearchSessionProps> = ({
           <div className="flex items-center justify-center py-4">
             <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-500"></div>
             <span className="ml-2 text-gray-600">Processing...</span>
+            <button
+              onClick={() => {
+                console.log('Manual reset of loading state');
+                setIsLoading(false);
+              }}
+              className="ml-4 px-3 py-1 text-sm bg-red-500 text-white rounded hover:bg-red-600 transition-colors"
+            >
+              Reset
+            </button>
           </div>
         )}
       </div>

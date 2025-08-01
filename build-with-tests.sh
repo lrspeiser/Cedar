@@ -359,40 +359,24 @@ test_writeup_functions() {
 
 # Function to run all unit tests
 run_all_unit_tests() {
-    print_status "Starting comprehensive unit testing..."
-    
-    # Reset test counters
-    TOTAL_TESTS=0
-    PASSED_TESTS=0
-    FAILED_TESTS=0
-    
-    # Test all function categories
-    test_api_key_functions
-    test_project_functions
-    test_research_functions
-    test_code_execution_functions
-    test_data_functions
-    test_session_functions
-    test_variable_functions
-    test_library_functions
-    test_visualization_functions
-    test_llm_functions
-    test_writeup_functions
-    
-    # Print test summary
-    echo ""
-    echo -e "${CYAN}=== UNIT TEST SUMMARY ===${NC}"
-    echo -e "Total Tests: ${TOTAL_TESTS}"
-    echo -e "Passed: ${GREEN}${PASSED_TESTS}${NC}"
-    echo -e "Failed: ${RED}${FAILED_TESTS}${NC}"
-    
-    if [ $FAILED_TESTS -eq 0 ]; then
-        print_success "All unit tests passed! Proceeding with build..."
-        return 0
-    else
-        print_error "Some unit tests failed. Please fix the issues before building."
-        return 1
-    fi
+  print_status "Starting comprehensive unit testing..."
+  
+  # Check if Unit Tests directory exists
+  if [ ! -d "Unit Tests" ]; then
+    print_error "Unit Tests directory not found. Please ensure test files are organized in the Unit Tests folder."
+    return 1
+  fi
+  
+  # Run the comprehensive test runner
+  print_status "Running comprehensive test suite from Unit Tests folder..."
+  
+  if node "Unit Tests/run-all-tests.js"; then
+    print_success "All unit tests passed! Proceeding with build..."
+    return 0
+  else
+    print_error "Some unit tests failed. Please fix the issues before building."
+    return 1
+  fi
 }
 
 # Function to build the project

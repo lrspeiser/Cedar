@@ -53,6 +53,7 @@ const ProjectView: React.FC<ProjectViewProps> = ({ project, onBack }) => {
   const [researchGoal, setResearchGoal] = useState(project.goal || '');
   const [isGeneratingTitle, setIsGeneratingTitle] = useState(false);
   const [showGoalInput, setShowGoalInput] = useState(!project.goal);
+  const [isResearchStarting, setIsResearchStarting] = useState(false);
 
   // Auto-switch to notebook tab if project has an active session
   useEffect(() => {
@@ -137,6 +138,9 @@ const ProjectView: React.FC<ProjectViewProps> = ({ project, onBack }) => {
       setProjectData(updatedProject);
       setShowGoalInput(false);
       
+      // Set research starting state
+      setIsResearchStarting(true);
+      
       // Start research session
       const sessionId = `session_${project.id}`;
       
@@ -161,6 +165,7 @@ const ProjectView: React.FC<ProjectViewProps> = ({ project, onBack }) => {
       alert('Failed to start research. Please try again.');
     } finally {
       setIsGeneratingTitle(false);
+      setIsResearchStarting(false);
     }
   };
 
@@ -206,7 +211,9 @@ const ProjectView: React.FC<ProjectViewProps> = ({ project, onBack }) => {
             projectId={project.id}
             goal={project.goal}
             answers={researchAnswers}
+            isResearchStarting={isResearchStarting}
             onContentGenerated={refreshProjectData}
+            onSessionLoaded={() => setIsResearchStarting(false)}
             onDataRouted={(result) => {
               console.log('Data routed:', result);
               // Refresh project data to show updated tabs
