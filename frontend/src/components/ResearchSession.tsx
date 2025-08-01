@@ -66,7 +66,7 @@ import CellComponent from './CellComponent';
 
 interface Cell {
   id: string;
-  type: 'goal' | 'initialization' | 'questions' | 'plan' | 'code' | 'result' | 'visualization' | 'writeup' | 'data' | 'reference' | 'variable' | 'library';
+  type: 'goal' | 'initialization' | 'questions' | 'plan' | 'code' | 'result' | 'visualization' | 'writeup' | 'data' | 'reference' | 'variable' | 'library' | 'title' | 'references' | 'abstract' | 'evaluation' | 'results';
   content: string;
   timestamp: string;
   output?: string;

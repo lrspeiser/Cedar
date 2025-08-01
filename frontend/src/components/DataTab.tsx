@@ -106,15 +106,37 @@ const DataTab: React.FC<DataTabProps> = ({ projectId, dataFiles, onDataFilesUpda
       // Read file content
       const content = await fileUpload.text();
       
-      // Upload to backend
-      const response = await apiService.uploadDataFile({
-        projectId,
-        filename: fileUpload.name,
-        content,
-        fileType: fileUpload.name.split('.').pop() || 'unknown'
-      });
+      // Get current session ID from project
+      const project = await apiService.getProject(projectId);
+      const sessionId = project?.session_id;
+      
+      if (sessionId) {
+        // Upload with notebook integration
+        const response = await apiService.uploadDataFileWithNotebook({
+          projectId,
+          filename: fileUpload.name,
+          content,
+          fileType: fileUpload.name.split('.').pop() || 'unknown',
+          sessionId
+        });
 
-      console.log('File uploaded successfully:', response);
+        console.log('File uploaded with notebook integration:', response);
+        
+        // Show success message with notebook cells created
+        if (response.notebook_cells) {
+          alert(`File uploaded successfully! Created ${response.notebook_cells.length} notebook cells for analysis.`);
+        }
+      } else {
+        // Fallback to regular upload
+        const response = await apiService.uploadDataFile({
+          projectId,
+          filename: fileUpload.name,
+          content,
+          fileType: fileUpload.name.split('.').pop() || 'unknown'
+        });
+
+        console.log('File uploaded successfully:', response);
+      }
       
       // Refresh data files
       await loadDataFiles();
@@ -169,6 +191,56 @@ const DataTab: React.FC<DataTabProps> = ({ projectId, dataFiles, onDataFilesUpda
       alert('Failed to execute query');
     } finally {
       setExecutingQuery(false);
+    }
+  };
+
+  const createNotebookQueryCell = async () => {
+    if (!selectedFile || !query.trim()) return;
+
+    try {
+      // Get current session ID from project
+      const project = await apiService.getProject(projectId);
+      const sessionId = project?.session_id;
+      
+      if (!sessionId) {
+        alert('No active session found. Please start a research session first.');
+        return;
+      }
+
+      // Execute the query
+      const response = await apiService.executeDuckDBQuery({
+        projectId,
+        tableName: selectedFile.table_name || 'unknown',
+        query: query.trim()
+      });
+
+      // Create a notebook cell for the query
+      const queryCell = {
+        id: `query_${Date.now()}`,
+        type: 'duckdb_query',
+        content: `DuckDB Query on ${selectedFile.name}:\n${query.trim()}`,
+        timestamp: new Date().toISOString(),
+        status: 'completed',
+        metadata: {
+          queryResults: response.results || [],
+          tableName: selectedFile.table_name,
+          fileName: selectedFile.name
+        }
+      };
+
+      // Add the cell to the session
+      const session = await apiService.loadSession(sessionId);
+      if (session) {
+        const cells = session.cells || [];
+        cells.push(queryCell);
+        await apiService.updateSession(sessionId, cells);
+        
+        alert('Query executed and added to notebook!');
+      }
+      
+    } catch (error) {
+      console.error('Failed to create notebook query cell:', error);
+      alert('Failed to create notebook query cell');
     }
   };
 
@@ -273,13 +345,22 @@ const DataTab: React.FC<DataTabProps> = ({ projectId, dataFiles, onDataFilesUpda
                   rows={4}
                 />
               </div>
-              <button
-                onClick={executeQuery}
-                disabled={!selectedFile || !query.trim() || executingQuery}
-                className="bg-blue-500 text-white px-4 py-2 rounded-md hover:bg-blue-600 disabled:opacity-50"
-              >
-                {executingQuery ? 'Executing...' : 'Execute Query'}
-              </button>
+              <div className="flex space-x-2">
+                <button
+                  onClick={executeQuery}
+                  disabled={!selectedFile || !query.trim() || executingQuery}
+                  className="bg-blue-500 text-white px-4 py-2 rounded-md hover:bg-blue-600 disabled:opacity-50"
+                >
+                  {executingQuery ? 'Executing...' : 'Execute Query'}
+                </button>
+                <button
+                  onClick={createNotebookQueryCell}
+                  disabled={!selectedFile || !query.trim()}
+                  className="bg-purple-500 text-white px-4 py-2 rounded-md hover:bg-purple-600 disabled:opacity-50"
+                >
+                  Add to Notebook
+                </button>
+              </div>
               
               {/* Query Results */}
               {queryResults.length > 0 && (

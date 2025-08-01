@@ -3,7 +3,7 @@ import { Play, CheckCircle, AlertCircle, ChevronRight, BookOpen, HelpCircle, Fil
 
 interface Cell {
   id: string;
-  type: 'goal' | 'initialization' | 'questions' | 'plan' | 'code' | 'result' | 'visualization' | 'writeup' | 'data' | 'reference' | 'variable' | 'library';
+  type: 'goal' | 'initialization' | 'questions' | 'plan' | 'code' | 'result' | 'visualization' | 'writeup' | 'data' | 'reference' | 'variable' | 'library' | 'title' | 'references' | 'abstract' | 'evaluation' | 'results' | 'data_upload' | 'data_analysis' | 'data_metadata' | 'duckdb_query';
   content: string;
   timestamp: string;
   output?: string;
@@ -19,6 +19,10 @@ interface Cell {
     variables?: any[];
     libraries?: any[];
     visualizations?: any[];
+    fileInfo?: any;
+    analysisScript?: string;
+    metadata?: any;
+    queryResults?: any;
   };
   requiresUserAction?: boolean;
   canProceed?: boolean;
@@ -56,6 +60,12 @@ const CellComponent: React.FC<CellComponentProps> = ({ cell, onExecute, onQuesti
     switch (cell.type) {
       case 'goal':
         return <HelpCircle className="h-4 w-4 text-blue-500" />;
+      case 'title':
+        return <FileText className="h-4 w-4 text-blue-600" />;
+      case 'references':
+        return <BookOpen className="h-4 w-4 text-green-500" />;
+      case 'abstract':
+        return <FileEdit className="h-4 w-4 text-purple-500" />;
       case 'initialization':
         return <BookOpen className="h-4 w-4 text-green-500" />;
       case 'questions':
@@ -65,13 +75,24 @@ const CellComponent: React.FC<CellComponentProps> = ({ cell, onExecute, onQuesti
       case 'code':
         return <Code className="h-4 w-4 text-indigo-500" />;
       case 'result':
+      case 'results':
         return <CheckCircle className="h-4 w-4 text-green-500" />;
+      case 'evaluation':
+        return <AlertCircle className="h-4 w-4 text-yellow-500" />;
       case 'visualization':
         return <BarChart3 className="h-4 w-4 text-pink-500" />;
       case 'writeup':
         return <FileEdit className="h-4 w-4 text-teal-500" />;
       case 'data':
         return <BarChart3 className="h-4 w-4 text-cyan-500" />;
+      case 'data_upload':
+        return <FileText className="h-4 w-4 text-blue-500" />;
+      case 'data_analysis':
+        return <Code className="h-4 w-4 text-indigo-500" />;
+      case 'data_metadata':
+        return <BarChart3 className="h-4 w-4 text-green-500" />;
+      case 'duckdb_query':
+        return <Code className="h-4 w-4 text-purple-500" />;
       case 'reference':
         return <BookOpen className="h-4 w-4 text-amber-500" />;
       case 'variable':
@@ -87,6 +108,12 @@ const CellComponent: React.FC<CellComponentProps> = ({ cell, onExecute, onQuesti
     switch (cell.type) {
       case 'goal':
         return 'Research Goal';
+      case 'title':
+        return 'Project Title';
+      case 'references':
+        return 'Academic References';
+      case 'abstract':
+        return 'Research Abstract';
       case 'initialization':
         return 'Research Initialization';
       case 'questions':
@@ -96,13 +123,24 @@ const CellComponent: React.FC<CellComponentProps> = ({ cell, onExecute, onQuesti
       case 'code':
         return 'Code Execution';
       case 'result':
-        return 'Execution Result';
+      case 'results':
+        return 'Execution Results';
+      case 'evaluation':
+        return 'Results Evaluation';
       case 'visualization':
         return 'Visualization';
       case 'writeup':
         return 'Research Write-up';
       case 'data':
         return 'Data File';
+      case 'data_upload':
+        return 'Data Upload';
+      case 'data_analysis':
+        return 'Data Analysis';
+      case 'data_metadata':
+        return 'Data Metadata';
+      case 'duckdb_query':
+        return 'DuckDB Query';
       case 'reference':
         return 'Reference';
       case 'variable':
@@ -122,6 +160,59 @@ const CellComponent: React.FC<CellComponentProps> = ({ cell, onExecute, onQuesti
             <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
               <h4 className="text-lg font-medium text-blue-900 mb-2">Research Goal</h4>
               <p className="text-blue-800">{cell.content}</p>
+            </div>
+          </div>
+        );
+
+      case 'title':
+        return (
+          <div className="space-y-4">
+            <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
+              <h4 className="text-lg font-medium text-blue-900 mb-2">Project Title</h4>
+              <p className="text-blue-800 font-semibold">{cell.content}</p>
+            </div>
+          </div>
+        );
+
+      case 'references':
+        return (
+          <div className="space-y-4">
+            <div className="bg-green-50 border border-green-200 rounded-lg p-4">
+              <h4 className="text-lg font-medium text-green-900 mb-2">Academic References</h4>
+              <p className="text-green-800 mb-4">{cell.content}</p>
+              
+              {cell.metadata?.references && cell.metadata.references.length > 0 && (
+                <div>
+                  <h4 className="text-sm font-medium text-gray-700 mb-2">References:</h4>
+                  <div className="space-y-2">
+                    {cell.metadata.references.map((ref, index) => (
+                      <div key={index} className="bg-gray-50 border border-gray-200 rounded p-3">
+                        <h5 className="font-medium text-gray-900">{ref.title}</h5>
+                        <p className="text-sm text-gray-600">{ref.authors} ({ref.year})</p>
+                        {ref.url && (
+                          <a href={ref.url} target="_blank" rel="noopener noreferrer" 
+                             className="text-sm text-blue-600 hover:text-blue-800">
+                            {ref.url}
+                          </a>
+                        )}
+                        <p className="text-sm text-gray-700 mt-2">{ref.abstract}</p>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+        );
+
+      case 'abstract':
+        return (
+          <div className="space-y-4">
+            <div className="bg-purple-50 border border-purple-200 rounded-lg p-4">
+              <h4 className="text-lg font-medium text-purple-900 mb-2">Research Abstract</h4>
+              <div className="prose prose-sm max-w-none">
+                <div className="whitespace-pre-wrap text-purple-800">{cell.content}</div>
+              </div>
             </div>
           </div>
         );
@@ -281,11 +372,14 @@ const CellComponent: React.FC<CellComponentProps> = ({ cell, onExecute, onQuesti
         );
 
       case 'result':
+      case 'results':
         return (
           <div className="space-y-4">
             <div className="bg-green-50 border border-green-200 rounded-lg p-4">
-              <h4 className="text-lg font-medium text-green-900 mb-2">Execution Result</h4>
-              <p className="text-green-800">{cell.content}</p>
+              <h4 className="text-lg font-medium text-green-900 mb-2">Execution Results</h4>
+              <div className="prose prose-sm max-w-none">
+                <div className="whitespace-pre-wrap text-green-800">{cell.content}</div>
+              </div>
               
               {cell.metadata?.executionResults && cell.metadata.executionResults.length > 0 && (
                 <div className="mt-4">
@@ -306,6 +400,18 @@ const CellComponent: React.FC<CellComponentProps> = ({ cell, onExecute, onQuesti
                   </div>
                 </div>
               )}
+            </div>
+          </div>
+        );
+
+      case 'evaluation':
+        return (
+          <div className="space-y-4">
+            <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4">
+              <h4 className="text-lg font-medium text-yellow-900 mb-2">Results Evaluation</h4>
+              <div className="prose prose-sm max-w-none">
+                <div className="whitespace-pre-wrap text-yellow-800">{cell.content}</div>
+              </div>
             </div>
           </div>
         );
@@ -377,6 +483,101 @@ const CellComponent: React.FC<CellComponentProps> = ({ cell, onExecute, onQuesti
               <h4 className="text-lg font-medium text-violet-900 mb-2">Library</h4>
               <div className="prose prose-sm max-w-none">
                 <div className="whitespace-pre-wrap text-violet-800">{cell.content}</div>
+              </div>
+            </div>
+          </div>
+        );
+
+      case 'data_upload':
+        return (
+          <div className="space-y-4">
+            <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
+              <h4 className="text-lg font-medium text-blue-900 mb-2">Data File Upload</h4>
+              <div className="prose prose-sm max-w-none">
+                <div className="whitespace-pre-wrap text-blue-800">{cell.content}</div>
+                {cell.metadata?.fileInfo && (
+                  <div className="mt-4 p-3 bg-blue-100 rounded">
+                    <h5 className="font-medium text-blue-900 mb-2">File Information:</h5>
+                    <div className="text-sm text-blue-800">
+                      <p><strong>Name:</strong> {cell.metadata.fileInfo.name}</p>
+                      <p><strong>Type:</strong> {cell.metadata.fileInfo.file_type}</p>
+                      <p><strong>Size:</strong> {cell.metadata.fileInfo.size_bytes} bytes</p>
+                      <p><strong>Uploaded:</strong> {new Date(cell.metadata.fileInfo.uploaded_at * 1000).toLocaleString()}</p>
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+        );
+
+      case 'data_analysis':
+        return (
+          <div className="space-y-4">
+            <div className="bg-indigo-50 border border-indigo-200 rounded-lg p-4">
+              <h4 className="text-lg font-medium text-indigo-900 mb-2">Data Analysis Script</h4>
+              <div className="prose prose-sm max-w-none">
+                <div className="whitespace-pre-wrap text-indigo-800 mb-4">{cell.content}</div>
+                {cell.metadata?.analysisScript && (
+                  <div className="mt-4">
+                    <h5 className="font-medium text-indigo-900 mb-2">Generated Analysis Script:</h5>
+                    <pre className="bg-indigo-100 p-3 rounded text-sm overflow-x-auto">
+                      <code className="text-indigo-800">{cell.metadata.analysisScript}</code>
+                    </pre>
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+        );
+
+      case 'data_metadata':
+        return (
+          <div className="space-y-4">
+            <div className="bg-green-50 border border-green-200 rounded-lg p-4">
+              <h4 className="text-lg font-medium text-green-900 mb-2">Data Metadata</h4>
+              <div className="prose prose-sm max-w-none">
+                <div className="whitespace-pre-wrap text-green-800 mb-4">{cell.content}</div>
+                {cell.metadata?.metadata && (
+                  <div className="mt-4 p-3 bg-green-100 rounded">
+                    <h5 className="font-medium text-green-900 mb-2">Extracted Metadata:</h5>
+                    <pre className="text-sm text-green-800 overflow-x-auto">
+                      {JSON.stringify(cell.metadata.metadata, null, 2)}
+                    </pre>
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+        );
+
+      case 'duckdb_query':
+        return (
+          <div className="space-y-4">
+            <div className="bg-purple-50 border border-purple-200 rounded-lg p-4">
+              <h4 className="text-lg font-medium text-purple-900 mb-2">DuckDB Query</h4>
+              <div className="prose prose-sm max-w-none">
+                <div className="whitespace-pre-wrap text-purple-800 mb-4">{cell.content}</div>
+                {cell.metadata?.queryResults && (
+                  <div className="mt-4">
+                    <h5 className="font-medium text-purple-900 mb-2">Query Results:</h5>
+                    <div className="bg-purple-100 p-3 rounded overflow-x-auto">
+                      <table className="min-w-full text-sm text-purple-800">
+                        <tbody>
+                          {cell.metadata.queryResults.map((row: any[], rowIndex: number) => (
+                            <tr key={rowIndex}>
+                              {row.map((cell: any, cellIndex: number) => (
+                                <td key={cellIndex} className="px-2 py-1 border border-purple-200">
+                                  {cell}
+                                </td>
+                              ))}
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                )}
               </div>
             </div>
           </div>

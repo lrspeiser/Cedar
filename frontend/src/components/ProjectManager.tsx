@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { apiService } from '../api';
-import { ResearchInitialization } from './ResearchInitialization';
+import IntegratedResearchFlow from './IntegratedResearchFlow';
 
 interface Project {
   id: string;
@@ -28,7 +28,7 @@ interface ProjectManagerProps {
 
 export const ProjectManager: React.FC<ProjectManagerProps> = ({ onProjectSelect, currentProject }) => {
   const [projects, setProjects] = useState<Project[]>([]);
-  const [showResearchInit, setShowResearchInit] = useState(false);
+  const [showIntegratedFlow, setShowIntegratedFlow] = useState(false);
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
@@ -47,87 +47,20 @@ export const ProjectManager: React.FC<ProjectManagerProps> = ({ onProjectSelect,
     }
   };
 
-  const handleResearchComplete = async (title: string, goal: string, answers: Record<string, string>, questions: any[], initialization: any) => {
+  const handleProjectComplete = async (project: Project) => {
     try {
       setLoading(true);
       
-      // Create the project with the generated title
-      const newProject = await apiService.createProject({
-        name: title,
-        goal: goal,
-      }) as Project;
-      
-      // Convert research initialization answers to questions and save them
-      const questionPromises = questions.map(async (questionData) => {
-        const answer = answers[questionData.id];
-        if (!answer) return;
-        
-        const question = {
-          id: questionData.id,
-          question: questionData.question,
-          answer: answer,
-          category: questionData.category,
-          created_at: new Date().toISOString(),
-          answered_at: new Date().toISOString(),
-          status: 'answered',
-          related_to: []
-        };
-        
-        try {
-          await apiService.addQuestion(newProject.id, question);
-        } catch (error) {
-          console.error('Failed to add question:', error);
-        }
-      });
-      
-      await Promise.all(questionPromises);
-      
-      setProjects(prev => [...prev, newProject]);
-      setShowResearchInit(false);
-      
-      // Store the answers and initialization data in the project for later use
-      const projectWithAnswers = {
-        ...newProject,
-        researchAnswers: answers,
-        researchInitialization: initialization,
-        variables: [],
-        questions: [],
-        libraries: []
-      };
+      // Add the completed project to the list
+      setProjects(prev => [...prev, project]);
+      setShowIntegratedFlow(false);
       
       // Auto-select the new project
-      onProjectSelect(projectWithAnswers);
+      onProjectSelect(project);
       
-      // Automatically start research with the answers
-      try {
-        const sessionId = `session_${newProject.id}`;
-        
-        const response = await apiService.startResearch({
-          projectId: newProject.id,
-          sessionId: sessionId,
-          goal: goal,
-          answers: answers
-        });
-
-        const responseData = response as any;
-        if (responseData.cells) {
-          // Research started successfully - update the project with session info
-          const projectWithSession = {
-            ...projectWithAnswers,
-            session_id: sessionId,
-            session_status: 'active'
-          };
-          
-          // Update the project selection with session data
-          onProjectSelect(projectWithSession);
-        }
-      } catch (error) {
-        console.error('Failed to auto-start research:', error);
-        // Don't fail the project creation, just log the error
-      }
     } catch (error) {
-      console.error('Failed to create project:', error);
-      alert('Failed to create project');
+      console.error('Failed to handle project completion:', error);
+      alert('Failed to complete project');
     } finally {
       setLoading(false);
     }
@@ -142,17 +75,17 @@ export const ProjectManager: React.FC<ProjectManagerProps> = ({ onProjectSelect,
       <div className="flex justify-between items-center mb-6">
         <h2 className="text-2xl font-bold text-gray-800">Research Projects</h2>
         <button
-          onClick={() => setShowResearchInit(true)}
+          onClick={() => setShowIntegratedFlow(true)}
           className="bg-cedar-500 text-white px-4 py-2 rounded-md hover:bg-cedar-600 transition-colors"
         >
           New Project
         </button>
       </div>
 
-      {showResearchInit && (
-        <ResearchInitialization
-          onComplete={handleResearchComplete}
-          onCancel={() => setShowResearchInit(false)}
+      {showIntegratedFlow && (
+        <IntegratedResearchFlow
+          onProjectComplete={handleProjectComplete}
+          onCancel={() => setShowIntegratedFlow(false)}
         />
       )}
 

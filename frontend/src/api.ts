@@ -1007,6 +1007,58 @@ class ApiService {
     }
   }
 
+  /**
+   * Data Management - Upload Data File with Notebook Integration
+   * 
+   * Uploads a data file and creates notebook cells for the upload process:
+   * - Data upload cell
+   * - LLM analysis script generation
+   * - Metadata extraction
+   * - DuckDB table creation
+   * 
+   * @param request - Enhanced data file upload request
+   * @returns Upload result with notebook cells
+   * @throws Error if upload fails
+   * 
+   * Example:
+   * ```javascript
+   * const result = await apiService.uploadDataFileWithNotebook({
+   *   projectId: 'project-123',
+   *   filename: 'data.csv',
+   *   content: 'name,age\nJohn,30\nJane,25',
+   *   fileType: 'csv',
+   *   sessionId: 'session-456'
+   * });
+   * ```
+   */
+  async uploadDataFileWithNotebook(request: { 
+    projectId: string; 
+    filename: string; 
+    content: string; 
+    fileType?: string;
+    sessionId: string;
+  }) {
+    console.log('📁 Calling Tauri backend: upload_data_file_with_notebook', request);
+    
+    try {
+      // Convert frontend field names to backend field names
+      const backendRequest = {
+        project_id: request.projectId,
+        filename: request.filename,
+        content: request.content,
+        file_type: request.fileType || null,
+        session_id: request.sessionId
+      };
+      
+      const result = await invoke('upload_data_file_with_notebook', { request: backendRequest });
+      console.log('✅ Backend data file uploaded with notebook integration');
+      return result;
+    } catch (error) {
+      console.error('❌ Backend error uploading data file with notebook:', error);
+      throw error;
+    }
+  }
+
   // Visualization Management Methods
   async createVisualization(request: {
     projectId: string;
@@ -1170,6 +1222,8 @@ class ApiService {
       throw error;
     }
   }
+
+
 
   async runApiTestSuite() {
     console.log('🧪 Running API test suite...');

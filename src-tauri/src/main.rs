@@ -13,9 +13,10 @@ use std::env;
 use std::io::{self, Write};
 use cedar::{cell, agent, context, executor, llm, storage};
 use cedar::executor::{ExecutionResult, StepEvaluation};
-use cedar::storage::{DataFileInfo, ColumnInfo, DataAnalysisRequest, DataAnalysisResponse, ColumnAnalysis, Visualization};
+use cedar::storage::{DataFileInfo, ColumnInfo, DataAnalysisRequest, DataAnalysisResponse, ColumnAnalysis, Visualization, create_duckdb_table};
 use std::fs;
 use std::path::PathBuf;
+use uuid::Uuid;
 
 /// Application State Management
 /// 
@@ -239,6 +240,14 @@ struct UploadDataFileRequest {
     filename: String,
     content: String,
     file_type: Option<String>, // Auto-detected if not provided
+}
+
+struct UploadDataFileWithNotebookRequest {
+    project_id: String,
+    filename: String,
+    content: String,
+    file_type: Option<String>,
+    session_id: String,
 }
 
 /// Data Analysis Request
@@ -4376,6 +4385,8 @@ async fn run_api_test_suite(state: State<'_, AppState>) -> Result<Vec<ApiTestRes
 
 // CLI Testing Functions
 #[derive(Debug, Serialize, Deserialize)]
+
+
 struct CliTestRequest {
     command: String,
     args: serde_json::Value,
@@ -4561,6 +4572,120 @@ Return ONLY valid JSON in this format:
         "file_info": updated_file_info,
         "analysis_response": analysis_response,
         "message": "Data file uploaded and analyzed successfully"
+    }))
+}
+
+/// Data Management - Upload Data File with Notebook Integration
+/// 
+/// Uploads a data file and creates notebook cells for the upload process:
+/// - Data upload cell
+/// - LLM analysis script generation
+/// - Metadata extraction
+/// - DuckDB table creation
+/// 
+/// FEATURES:
+/// - Automatic notebook cell creation
+/// - LLM-powered analysis
+/// - Session integration
+/// - Progress tracking
+/// 
+/// Example usage:
+/// ```javascript
+/// const result = await apiService.uploadDataFileWithNotebook({
+///   projectId: 'project-123',
+///   filename: 'data.csv',
+///   content: 'name,age\nJohn,30\nJane,25',
+///   fileType: 'csv',
+///   sessionId: 'session-456'
+/// });
+/// ```
+#[tauri::command]
+async fn upload_data_file_with_notebook(
+    request: UploadDataFileWithNotebookRequest,
+    state: State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    println!("📁 Backend: Uploading data file with notebook integration: {} to project: {}", request.filename, request.project_id);
+    
+    // First, perform the regular upload
+    let upload_request = UploadDataFileRequest {
+        project_id: request.project_id.clone(),
+        filename: request.filename.clone(),
+        content: request.content.clone(),
+        file_type: request.file_type.clone(),
+    };
+    
+    let upload_result = upload_data_file(upload_request, state.clone()).await?;
+    
+    // Extract information from upload result
+    let file_info = &upload_result["file_info"];
+    let analysis_response = &upload_result["analysis_response"];
+    
+            // Create notebook cells for the upload process
+        let cells = vec![
+            // Data Upload Cell
+            serde_json::json!({
+                "id": format!("upload_{}", Uuid::new_v4()),
+                "type": "data_upload",
+                "content": format!("Uploaded data file: {}", request.filename),
+                "timestamp": chrono::Utc::now().to_rfc3339(),
+                "status": "completed",
+                "metadata": {
+                    "fileInfo": file_info
+                }
+            }),
+            
+            // Data Analysis Cell
+            serde_json::json!({
+                "id": format!("analysis_{}", Uuid::new_v4()),
+                "type": "data_analysis",
+                "content": format!("LLM-generated analysis script for {}", request.filename),
+                "timestamp": chrono::Utc::now().to_rfc3339(),
+                "status": "completed",
+                "metadata": {
+                    "analysisScript": analysis_response["analysis_script"]
+                }
+            }),
+            
+            // Data Metadata Cell
+            serde_json::json!({
+                "id": format!("metadata_{}", Uuid::new_v4()),
+                "type": "data_metadata",
+                "content": format!("Extracted metadata for {}", request.filename),
+                "timestamp": chrono::Utc::now().to_rfc3339(),
+                "status": "completed",
+                "metadata": {
+                    "metadata": {
+                        "summary": analysis_response["data_summary"],
+                        "column_analysis": analysis_response["column_analysis"],
+                        "table_name": file_info["table_name"]
+                    }
+                }
+            })
+        ];
+    
+    // Update the session with new cells
+    let session_guard = state.sessions.lock().unwrap();
+    if let Some(session_data) = session_guard.get(&request.session_id) {
+        let mut updated_session = session_data.clone();
+        if let Some(cells_array) = updated_session.get_mut("cells") {
+            if let Some(cells_vec) = cells_array.as_array_mut() {
+                cells_vec.extend(cells.clone());
+            }
+        }
+        
+        // Save updated session
+        drop(session_guard);
+        save_session_to_disk(&request.session_id, &updated_session)?;
+        
+        let mut sessions_guard = state.sessions.lock().unwrap();
+        sessions_guard.insert(request.session_id.clone(), updated_session);
+    }
+    
+    // Return result with notebook cells
+    Ok(serde_json::json!({
+        "success": true,
+        "upload_result": upload_result,
+        "notebook_cells": cells
     }))
 }
 
@@ -5099,16 +5224,18 @@ fn main() {
             generate_research_plan,
             execute_step,
             generate_next_steps,
+
             // Visualization Management endpoints
             create_visualization,
             list_visualizations,
             delete_visualization,
             generate_visualization,
             // Data Management endpoints
-            // upload_data_file,
-            // analyze_data_file,
-            // execute_duckdb_query,
-            // list_data_files,
+            upload_data_file,
+            upload_data_file_with_notebook,
+            analyze_data_file,
+            execute_duckdb_query,
+            list_data_files,
             // API Testing endpoints
             test_api_endpoint,
             run_test_suite,
