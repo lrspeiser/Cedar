@@ -686,6 +686,119 @@ class ApiService {
     }
   }
 
+  /**
+   * Generate Research Plan - Generate comprehensive research plan
+   * 
+   * Generates a detailed research plan based on:
+   * - Research goal and user answers
+   * - Academic sources and background summary
+   * - Selected research directions
+   * 
+   * TESTING: Use in browser console with test-research-plan.js
+   * 
+   * @param request - Research plan generation request
+   * @returns ResearchPlan with steps and execution details
+   */
+  async generateResearchPlan(request: { 
+    goal: string; 
+    answers: Record<string, string>; 
+    sources: any[]; 
+    background_summary: string; 
+  }) {
+    console.log('🔧 Calling Tauri backend: generate_research_plan', request);
+    
+    try {
+      const result = await invoke('generate_research_plan', { request });
+      console.log('✅ Backend research plan generated successfully');
+      return result;
+    } catch (error) {
+      console.error('❌ Backend error generating research plan:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Execute Step - Execute single research step
+   * 
+   * Executes a single research step and returns results:
+   * - Code execution with logging
+   * - Variable extraction and tracking
+   * - Library detection and installation
+   * 
+   * TESTING: Use in browser console with test-step-execution.js
+   * 
+   * @param request - Step execution request
+   * @returns Step execution results with output and logs
+   */
+  async executeStep(request: { 
+    sessionId: string; 
+    projectId: string; 
+    stepId: string; 
+    code: string; 
+    stepTitle: string; 
+    stepDescription: string; 
+  }) {
+    console.log('🔧 Calling Tauri backend: execute_step', request);
+    
+    try {
+      // Convert frontend field names to backend field names
+      const backendRequest = {
+        session_id: request.sessionId,
+        project_id: request.projectId,
+        step_id: request.stepId,
+        code: request.code,
+        step_title: request.stepTitle,
+        step_description: request.stepDescription
+      };
+      
+      const result = await invoke('execute_step', { request: backendRequest });
+      console.log('✅ Backend step executed successfully');
+      return result;
+    } catch (error) {
+      console.error('❌ Backend error executing step:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Generate Next Steps - Generate next steps based on results
+   * 
+   * Analyzes completed steps and results to generate next steps:
+   * - Evaluates current progress and findings
+   * - Identifies gaps and opportunities
+   * - Generates actionable next steps
+   * 
+   * TESTING: Use in browser console with test-next-steps.js
+   * 
+   * @param request - Next steps generation request
+   * @returns Array of ResearchPlanStep for next steps
+   */
+  async generateNextSteps(request: { 
+    goal: string; 
+    completedSteps: any[]; 
+    currentResults: any; 
+    projectContext: any; 
+  }) {
+    console.log('🔧 Calling Tauri backend: generate_next_steps', request);
+    
+    try {
+      // Convert frontend field names to backend field names
+      const backendRequest = {
+        goal: request.goal,
+        completed_steps: request.completedSteps,
+        current_results: request.currentResults,
+        project_context: request.projectContext
+      };
+      
+      const result = await invoke('generate_next_steps', { request: backendRequest });
+      console.log('✅ Backend next steps generated successfully');
+      return result;
+    } catch (error) {
+      console.error('❌ Backend error generating next steps:', error);
+      throw error;
+    }
+  }
+
   // async extractLibrariesFromCode(projectId: string, code: string, cellId: string) {
   //   console.log("🔧 Calling Tauri backend: extract_libraries_from_code", { projectId, codeLength: code.length, cellId });
   //   try {

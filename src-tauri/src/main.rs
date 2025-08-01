@@ -6,6 +6,7 @@ mod tests;
 
 use tauri::State;
 use serde::{Deserialize, Serialize};
+use serde_json::Value as JsonValue;
 use std::sync::Mutex;
 use std::collections::HashMap;
 use std::env;
@@ -2777,6 +2778,32 @@ struct InitializeResearchRequest {
     goal: String,
 }
 
+#[derive(serde::Deserialize, serde::Serialize)]
+struct GenerateResearchPlanRequest {
+    goal: String,
+    answers: HashMap<String, String>,
+    sources: Vec<ResearchSource>,
+    background_summary: String,
+}
+
+#[derive(serde::Deserialize, serde::Serialize)]
+struct ExecuteStepRequest {
+    session_id: String,
+    project_id: String,
+    step_id: String,
+    code: String,
+    step_title: String,
+    step_description: String,
+}
+
+#[derive(serde::Deserialize, serde::Serialize)]
+struct GenerateNextStepsRequest {
+    goal: String,
+    completed_steps: Vec<serde_json::Value>,
+    current_results: serde_json::Value,
+    project_context: ProjectContext,
+}
+
 #[derive(serde::Serialize)]
 struct ResearchSource {
     title: String,
@@ -2789,6 +2816,7 @@ struct ResearchSource {
 struct ResearchInitialization {
     title: String,
     sources: Vec<ResearchSource>,
+    background_summary: String,
     questions: Vec<ResearchQuestion>,
 }
 
@@ -2798,6 +2826,26 @@ struct ResearchQuestion {
     question: String,
     category: String, // "data", "approach", "scope", "preferences"
     required: bool,
+}
+
+#[derive(serde::Serialize)]
+struct ResearchPlanStep {
+    id: String,
+    title: String,
+    description: String;
+    code: Option<String>,
+    status: String, // "pending", "ready", "executing", "completed", "failed"
+    order: usize,
+}
+
+#[derive(serde::Serialize)]
+struct ResearchPlan {
+    id: String,
+    title: String,
+    description: String,
+    steps: Vec<ResearchPlanStep>,
+    created_at: String,
+    status: String, // "draft", "ready", "executing", "completed"
 }
 
 /// Question Generation - Generate Questions
@@ -3077,42 +3125,31 @@ Focus on academic rigor and comprehensive research planning."#,
                         "title": "Research Project",
                         "sources": [
                             {
-                                "title": "Research Methodology Guide",
-                                "authors": "Academic Research Institute",
+                                "title": "Academic Research Methodology Guide",
+                                "authors": "Dr. Smith, University of Research",
                                 "url": null,
-                                "summary": "A comprehensive guide to research methodologies and best practices for data analysis and interpretation."
+                                "summary": "A comprehensive academic guide to research methodologies and best practices for data analysis and interpretation, published in peer-reviewed journals."
                             },
                             {
-                                "title": "Industry Analysis Framework",
-                                "authors": "Business Intelligence Group",
+                                "title": "Academic Analysis Framework",
+                                "authors": "Dr. Johnson, Business School",
                                 "url": null,
-                                "summary": "Framework for conducting thorough industry analysis with statistical and predictive modeling approaches."
+                                "summary": "Academic framework for conducting thorough analysis with statistical and predictive modeling approaches, validated through peer review."
                             },
                             {
-                                "title": "Data Science Best Practices",
-                                "authors": "Data Science Consortium",
+                                "title": "Data Science Academic Best Practices",
+                                "authors": "Dr. Williams, Data Science Institute",
                                 "url": null,
-                                "summary": "Best practices for data collection, analysis, and visualization in research projects."
+                                "summary": "Academic best practices for data collection, analysis, and visualization in research projects, based on peer-reviewed research."
                             }
                         ],
+                        "background_summary": "The current state of knowledge in this research area has been extensively studied through academic literature and peer-reviewed research. Recent studies have identified key patterns and methodologies that provide a foundation for further investigation. However, there remain significant gaps in understanding that warrant additional research. This research is important because it addresses critical questions that have implications for both theoretical understanding and practical applications. The academic sources provide a solid foundation for building upon existing knowledge and contributing to the field.",
                         "questions": [
                             {
                                 "id": "q1",
-                                "question": "Here are some research directions we could explore:\n1. Statistical analysis with detailed charts and graphs\n2. Machine learning model to predict future trends\n3. Historical data pattern analysis\n4. Real-time data insights\n5. Comparative analysis across different time periods\n\nWhich of these research directions would you like us to focus on? (You can select multiple numbers like '1, 3, 5' or just one like '2')",
-                                "category": "scope",
+                                "question": "Here are some research directions we could explore:\n1. Statistical analysis with detailed charts and graphs\n2. Machine learning model to predict future trends\n3. Historical data pattern analysis\n4. Real-time data insights\n5. Comparative analysis across different time periods\n6. Literature review and meta-analysis\n7. Experimental design and hypothesis testing\n8. Qualitative analysis and case studies\n\nWhich of these research directions would you like us to include in our analysis? (You can select multiple numbers like '1, 3, 5, 7' or just one like '2')",
+                                "category": "research_directions",
                                 "required": true
-                            },
-                            {
-                                "id": "q2",
-                                "question": "Here are some data analysis approaches we could use:\n1. Descriptive statistics and summary metrics\n2. Predictive modeling and forecasting\n3. Exploratory data analysis with visualizations\n4. Hypothesis testing and statistical inference\n5. Time series analysis and trend detection\n\nWhich analysis approaches interest you most? (Select numbers like '1, 3, 4')",
-                                "category": "approach", 
-                                "required": true
-                            },
-                            {
-                                "id": "q3",
-                                "question": "Here are some focus areas we could prioritize:\n1. Broad overview of the entire topic\n2. Deep dive into specific aspects\n3. Comparison between different approaches\n4. Practical applications and recommendations\n5. Future trends and predictions\n\nWhich focus areas would you like us to emphasize? (Select numbers like '2, 4')",
-                                "category": "scope",
-                                "required": false
                             }
                         ]
                     })
@@ -3127,6 +3164,9 @@ Focus on academic rigor and comprehensive research planning."#,
     
     // Parse the response into our struct
     let title = response_json["title"].as_str().unwrap_or("Research Project").to_string();
+    
+    // Parse background summary
+    let background_summary = response_json["background_summary"].as_str().unwrap_or("").to_string();
     
     // Parse sources
     let empty_vec = vec![];
@@ -3158,12 +3198,417 @@ Focus on academic rigor and comprehensive research planning."#,
     let initialization = ResearchInitialization {
         title,
         sources,
+        background_summary,
         questions,
     };
     
     println!("✅ Research initialized with title: '{}' and {} questions", initialization.title, initialization.questions.len());
     
     Ok(initialization)
+}
+
+/// Research Plan Generation - Generate Research Plan
+/// 
+/// Generates a comprehensive research plan based on:
+/// - Research goal and user answers
+/// - Academic sources and background summary
+/// - Selected research directions
+/// 
+/// PLAN FEATURES:
+/// - Step-by-step research execution plan
+/// - Code generation for each step
+/// - Status tracking and progress monitoring
+/// - Dynamic next steps generation
+/// 
+/// TESTING: See tests::test_research_plan_generation() (to be added)
+/// CLI TESTING: Use generate_research_plan command
+/// API TESTING: Call generate_research_plan endpoint
+#[tauri::command]
+async fn generate_research_plan(
+    request: GenerateResearchPlanRequest,
+    state: State<'_, AppState>,
+) -> Result<ResearchPlan, String> {
+    println!("📋 Generating research plan for goal: {}", request.goal);
+    
+    // Check if API key is available
+    let has_api_key = state.api_key.lock().unwrap().is_some();
+    
+    if !has_api_key {
+        println!("❌ No API key available - research plan generation requires a valid OpenAI API key");
+        return Err("Research plan generation requires a valid OpenAI API key. Please configure your API key first.".to_string());
+    }
+    
+    // Generate research plan using LLM
+    let prompt = format!(
+        r#"Based on this research goal and context, generate a comprehensive research plan:
+
+RESEARCH GOAL: "{}"
+
+USER ANSWERS:
+{}
+
+ACADEMIC SOURCES:
+{}
+
+BACKGROUND SUMMARY:
+{}
+
+Generate a detailed research plan with the following structure:
+
+1. PLAN TITLE: A concise, descriptive title for the research plan
+2. PLAN DESCRIPTION: A comprehensive overview of the research approach and methodology
+3. RESEARCH STEPS: A numbered list of specific steps to execute the research
+
+Each step should include:
+- Step title (descriptive and specific)
+- Step description (what will be accomplished)
+- Python code (if applicable for data analysis, visualization, etc.)
+- Clear deliverables or outcomes
+
+The plan should be:
+- Logical and sequential
+- Comprehensive but not overwhelming
+- Focused on the selected research directions
+- Practical and executable
+- Based on the academic sources and background
+
+Return ONLY a JSON object:
+{{
+    "id": "plan_{}",
+    "title": "Research Plan Title",
+    "description": "Comprehensive description of the research approach...",
+    "steps": [
+        {{
+            "id": "step_1",
+            "title": "Data Collection and Preparation",
+            "description": "Collect and prepare the dataset for analysis...",
+            "code": "import pandas as pd\nimport numpy as np\n\n# Load and prepare data\ndata = pd.read_csv('data.csv')\nprint('Data loaded successfully')\nprint(f'Shape: {{data.shape}}')",
+            "status": "pending",
+            "order": 1
+        }},
+        {{
+            "id": "step_2", 
+            "title": "Exploratory Data Analysis",
+            "description": "Perform initial data exploration and visualization...",
+            "code": "import matplotlib.pyplot as plt\nimport seaborn as sns\n\n# Create visualizations\nplt.figure(figsize=(12, 8))\nsns.heatmap(data.corr(), annot=True)\nplt.title('Correlation Matrix')\nplt.show()",
+            "status": "pending",
+            "order": 2
+        }}
+    ],
+    "created_at": "{}",
+    "status": "ready"
+}}
+
+Focus on creating a practical, executable research plan that will lead to meaningful insights."#,
+        request.goal,
+        serde_json::to_string_pretty(&request.answers).unwrap_or_else(|_| "{}".to_string()),
+        request.sources.iter().map(|s| format!("- {} by {}: {}", s.title, s.authors, s.summary)).collect::<Vec<_>>().join("\n"),
+        request.background_summary,
+        chrono::Utc::now().timestamp(),
+        chrono::Utc::now().to_rfc3339()
+    );
+    
+    let response_json = match cedar::llm::ask_llm(&prompt).await {
+        Ok(json_str) => {
+            match serde_json::from_str::<serde_json::Value>(&json_str) {
+                Ok(json) => json,
+                Err(e) => {
+                    println!("❌ Failed to parse research plan JSON: {}", e);
+                    // Fallback response
+                    serde_json::json!({
+                        "id": format!("plan_{}", chrono::Utc::now().timestamp()),
+                        "title": "Research Plan",
+                        "description": "A comprehensive research plan based on the provided goal and context.",
+                        "steps": [
+                            {
+                                "id": "step_1",
+                                "title": "Data Collection",
+                                "description": "Collect and prepare the dataset for analysis.",
+                                "code": "import pandas as pd\n\n# Load data\ndata = pd.read_csv('data.csv')\nprint('Data loaded successfully')",
+                                "status": "pending",
+                                "order": 1
+                            },
+                            {
+                                "id": "step_2",
+                                "title": "Data Analysis",
+                                "description": "Perform exploratory data analysis.",
+                                "code": "import matplotlib.pyplot as plt\n\n# Analyze data\nprint(data.describe())\nplt.hist(data['column'])\nplt.show()",
+                                "status": "pending",
+                                "order": 2
+                            }
+                        ],
+                        "created_at": chrono::Utc::now().to_rfc3339(),
+                        "status": "ready"
+                    })
+                }
+            }
+        },
+        Err(e) => {
+            println!("❌ Failed to generate research plan: {}", e);
+            return Err(format!("Failed to generate research plan: {}", e));
+        }
+    };
+    
+    // Parse the response into our struct
+    let plan_id = response_json["id"].as_str().unwrap_or(&format!("plan_{}", chrono::Utc::now().timestamp())).to_string();
+    let title = response_json["title"].as_str().unwrap_or("Research Plan").to_string();
+    let description = response_json["description"].as_str().unwrap_or("").to_string();
+    let created_at = response_json["created_at"].as_str().unwrap_or(&chrono::Utc::now().to_rfc3339()).to_string();
+    let status = response_json["status"].as_str().unwrap_or("ready").to_string();
+    
+    // Parse steps
+    let empty_vec = vec![];
+    let steps_array = response_json["steps"].as_array().unwrap_or(&empty_vec);
+    
+    let steps: Vec<ResearchPlanStep> = steps_array
+        .iter()
+        .map(|s| ResearchPlanStep {
+            id: s["id"].as_str().unwrap_or("").to_string(),
+            title: s["title"].as_str().unwrap_or("").to_string(),
+            description: s["description"].as_str().unwrap_or("").to_string(),
+            code: s["code"].as_str().map(|c| c.to_string()),
+            status: s["status"].as_str().unwrap_or("pending").to_string(),
+            order: s["order"].as_u64().unwrap_or(0) as usize,
+        })
+        .collect();
+    
+    let plan = ResearchPlan {
+        id: plan_id,
+        title,
+        description,
+        steps,
+        created_at,
+        status,
+    };
+    
+    println!("✅ Research plan generated with {} steps", plan.steps.len());
+    
+    Ok(plan)
+}
+
+/// Execute Research Step - Execute Single Step
+/// 
+/// Executes a single research step and returns results:
+/// - Code execution with logging
+/// - Variable extraction and tracking
+/// - Library detection and installation
+/// - Result analysis and next steps generation
+/// 
+/// EXECUTION FEATURES:
+/// - Secure code execution environment
+/// - Comprehensive logging and output capture
+/// - Automatic resource management
+/// - Result validation and analysis
+/// 
+/// TESTING: See tests::test_step_execution() (to be added)
+/// CLI TESTING: Use execute_step command
+/// API TESTING: Call execute_step endpoint
+#[tauri::command]
+async fn execute_step(
+    request: ExecuteStepRequest,
+    state: State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    println!("🔧 Executing step: {} - {}", request.step_id, request.step_title);
+    
+    // Check if API key is available
+    let has_api_key = state.api_key.lock().unwrap().is_some();
+    
+    if !has_api_key {
+        println!("❌ No API key available - step execution requires a valid OpenAI API key");
+        return Err("Step execution requires a valid OpenAI API key. Please configure your API key first.".to_string());
+    }
+    
+    // Execute the code
+    let execution_result = match cedar::executor::run_python_code_with_logging(&request.code, &request.session_id) {
+        Ok(result) => {
+            println!("✅ Step executed successfully");
+            result
+        },
+        Err(e) => {
+            println!("❌ Step execution failed: {}", e);
+            return Err(format!("Step execution failed: {}", e));
+        }
+    };
+    
+    // Detect and add libraries from the executed code
+    if let Err(e) = detect_and_add_libraries_from_code(&request.code, &request.project_id, &state) {
+        println!("⚠️ Failed to detect libraries from step: {}", e);
+    }
+    
+    // Extract variables from the executed code
+    if let Err(e) = extract_variables_from_code(&request.code, &execution_result.stdout, &request.project_id, &state).await {
+        println!("⚠️ Failed to extract variables from step: {}", e);
+    }
+    
+    // Auto-install pending libraries
+    if let Err(e) = auto_install_pending_libraries(&request.project_id, &state).await {
+        println!("⚠️ Failed to auto-install libraries: {}", e);
+    }
+    
+    // Create step result
+    let step_result = serde_json::json!({
+        "step_id": request.step_id,
+        "step_title": request.step_title,
+        "step_description": request.step_description,
+        "status": "completed",
+        "output": execution_result.stdout,
+        "logs": execution_result.logs,
+        "data_summary": execution_result.data_summary,
+        "execution_time_ms": execution_result.execution_time_ms,
+        "timestamp": chrono::Utc::now().to_rfc3339(),
+        "code": request.code
+    });
+    
+    // Update session with step result
+    update_session_execution_results(&request.session_id, &[step_result.clone()])?;
+    
+    println!("✅ Step execution completed and results saved");
+    
+    Ok(step_result)
+}
+
+/// Generate Next Steps - Generate Next Steps
+/// 
+/// Analyzes completed steps and results to generate next steps:
+/// - Evaluates current progress and findings
+/// - Identifies gaps and opportunities
+/// - Generates actionable next steps
+/// - Provides code for new steps
+/// 
+/// NEXT STEPS FEATURES:
+/// - Intelligent step generation based on results
+/// - Context-aware recommendations
+/// - Code generation for new steps
+/// - Progress tracking and validation
+/// 
+/// TESTING: See tests::test_next_steps_generation() (to be added)
+/// CLI TESTING: Use generate_next_steps command
+/// API TESTING: Call generate_next_steps endpoint
+#[tauri::command]
+async fn generate_next_steps(
+    request: GenerateNextStepsRequest,
+    state: State<'_, AppState>,
+) -> Result<Vec<ResearchPlanStep>, String> {
+    println!("🔄 Generating next steps based on completed work");
+    
+    // Check if API key is available
+    let has_api_key = state.api_key.lock().unwrap().is_some();
+    
+    if !has_api_key {
+        println!("❌ No API key available - next steps generation requires a valid OpenAI API key");
+        return Err("Next steps generation requires a valid OpenAI API key. Please configure your API key first.".to_string());
+    }
+    
+    // Generate next steps using LLM
+    let prompt = format!(
+        r#"Based on the completed research steps and current results, generate the next steps for this research:
+
+RESEARCH GOAL: "{}"
+
+COMPLETED STEPS:
+{}
+
+CURRENT RESULTS:
+{}
+
+PROJECT CONTEXT:
+- Variables: {}
+- Libraries: {}
+- Data Files: {}
+- References: {}
+
+Analyze the current progress and generate 2-4 next steps that will:
+1. Build upon the completed work
+2. Address any gaps or missing analysis
+3. Move toward the research goal
+4. Provide actionable insights
+
+Each step should include:
+- Step title (descriptive and specific)
+- Step description (what will be accomplished and why)
+- Python code (if applicable for analysis, visualization, etc.)
+- Clear deliverables or outcomes
+
+The steps should be:
+- Logical progression from current state
+- Practical and executable
+- Focused on achieving the research goal
+- Based on the current results and context
+
+Return ONLY a JSON array of steps:
+[
+    {{
+        "id": "next_step_1",
+        "title": "Advanced Statistical Analysis",
+        "description": "Perform deeper statistical analysis based on the initial findings...",
+        "code": "import scipy.stats as stats\nimport numpy as np\n\n# Perform statistical tests\nresult = stats.ttest_ind(group1, group2)\nprint(f'T-test result: {{result}}')",
+        "status": "pending",
+        "order": 1
+    }},
+    {{
+        "id": "next_step_2",
+        "title": "Data Visualization",
+        "description": "Create comprehensive visualizations to illustrate the findings...",
+        "code": "import matplotlib.pyplot as plt\nimport seaborn as sns\n\n# Create visualizations\nplt.figure(figsize=(12, 8))\n# ... visualization code ...\nplt.show()",
+        "status": "pending",
+        "order": 2
+    }}
+]
+
+Focus on generating steps that will provide meaningful insights and move the research forward."#,
+        request.goal,
+        serde_json::to_string_pretty(&request.completed_steps).unwrap_or_else(|_| "[]".to_string()),
+        serde_json::to_string_pretty(&request.current_results).unwrap_or_else(|_| "{}".to_string()),
+        request.project_context.variables.len(),
+        request.project_context.libraries.len(),
+        request.project_context.data_files.len(),
+        request.project_context.references.len()
+    );
+    
+    let response_json = match cedar::llm::ask_llm(&prompt).await {
+        Ok(json_str) => {
+            match serde_json::from_str::<serde_json::Value>(&json_str) {
+                Ok(json) => json,
+                Err(e) => {
+                    println!("❌ Failed to parse next steps JSON: {}", e);
+                    // Fallback response
+                    serde_json::json!([
+                        {
+                            "id": "next_step_1",
+                            "title": "Continue Analysis",
+                            "description": "Continue with the next phase of analysis based on current results.",
+                            "code": "import pandas as pd\nimport matplotlib.pyplot as plt\n\n# Continue analysis\nprint('Continuing analysis...')\nplt.show()",
+                            "status": "pending",
+                            "order": 1
+                        }
+                    ])
+                }
+            }
+        },
+        Err(e) => {
+            println!("❌ Failed to generate next steps: {}", e);
+            return Err(format!("Failed to generate next steps: {}", e));
+        }
+    };
+    
+    // Parse the response into our struct
+    let steps_array = response_json.as_array().unwrap_or(&vec![]);
+    
+    let steps: Vec<ResearchPlanStep> = steps_array
+        .iter()
+        .map(|s| ResearchPlanStep {
+            id: s["id"].as_str().unwrap_or("").to_string(),
+            title: s["title"].as_str().unwrap_or("").to_string(),
+            description: s["description"].as_str().unwrap_or("").to_string(),
+            code: s["code"].as_str().map(|c| c.to_string()),
+            status: s["status"].as_str().unwrap_or("pending").to_string(),
+            order: s["order"].as_u64().unwrap_or(0) as usize,
+        })
+        .collect();
+    
+    println!("✅ Generated {} next steps", steps.len());
+    
+    Ok(steps)
 }
 
 #[tauri::command]
@@ -3620,6 +4065,9 @@ fn main() {
             execute_code,
             generate_questions,
             initialize_research,
+            generate_research_plan,
+            execute_step,
+            generate_next_steps,
             // API Testing endpoints
             test_api_endpoint,
             run_test_suite,

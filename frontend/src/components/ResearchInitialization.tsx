@@ -18,6 +18,7 @@ interface ResearchQuestion {
 interface ResearchInitialization {
   title: string;
   sources: ResearchSource[];
+  background_summary: string;
   questions: ResearchQuestion[];
 }
 
@@ -157,13 +158,13 @@ export const ResearchInitialization: React.FC<ResearchInitializationProps> = ({
           </div>
         </div>
         
-        <div className="flex-1 overflow-y-auto p-6">
+                <div className="flex-1 overflow-y-auto p-6">
           <div className="max-w-4xl mx-auto">
             <div className="space-y-6">
               {/* Research Sources Section */}
               <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
                 <h3 className="text-lg font-semibold text-blue-800 mb-3">
-                  📚 Top Research Sources
+                  📚 Top Academic Research Sources
                 </h3>
                 <div className="space-y-4">
                   {initialization.sources.map((source, index) => (
@@ -192,13 +193,29 @@ export const ResearchInitialization: React.FC<ResearchInitializationProps> = ({
                 </div>
               </div>
 
-              {/* Questions Section */}
+              {/* Background Summary Section */}
+              <div className="bg-green-50 border border-green-200 rounded-lg p-4">
+                <h3 className="text-lg font-semibold text-green-800 mb-3">
+                  📖 Research Background Summary
+                </h3>
+                <div className="bg-white border border-green-100 rounded-md p-4">
+                  <div className="prose prose-sm max-w-none">
+                    {initialization.background_summary.split('\n\n').map((paragraph, index) => (
+                      <p key={index} className="text-gray-700 leading-relaxed mb-3 last:mb-0">
+                        {paragraph}
+                      </p>
+                    ))}
+                  </div>
+                </div>
+              </div>
+
+              {/* Research Directions Section */}
               <div className="bg-gray-50 border border-gray-200 rounded-lg p-4">
                 <h3 className="text-lg font-semibold text-gray-800 mb-3">
-                  ❓ Research Questions
+                  🎯 Research Directions
                 </h3>
                 <div className="space-y-4">
-                                    {initialization.questions.map((question) => (
+                  {initialization.questions.map((question) => (
                     <div key={question.id} className="border-b border-gray-200 pb-4">
                       <label className="block text-sm font-medium text-gray-700 mb-2">
                         {question.question}
