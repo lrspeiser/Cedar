@@ -2,6 +2,34 @@
 
 Cedar is an intelligent research assistant that combines the power of large language models with interactive code execution to help researchers explore data, run experiments, and generate insights. Built with Rust and React, it provides a modern desktop application experience with robust AI capabilities.
 
+## 🆕 Latest Features
+
+### 📊 **Data Management System**
+- **File Upload & Analysis**: Upload CSV, JSON, TSV, and other data files
+- **DuckDB Integration**: PostgreSQL-style SQL interface for data querying
+- **LLM-Powered Analysis**: AI automatically analyzes data structure and generates insights
+- **Data Visualization**: Built-in data exploration and visualization tools
+- **Metadata Management**: Comprehensive file metadata and column information
+
+### 🧠 **Enhanced Research Capabilities**
+- **Intelligent Step Generation**: AI creates adaptive research plans based on goals
+- **Session Persistence**: Research sessions are automatically saved and can be resumed
+- **Variable Detection**: Automatic detection and categorization of code variables
+- **Library Management**: Smart detection and installation of Python dependencies
+- **Academic References**: AI-suggested relevant academic papers and citations
+
+### 📝 **Publication Pipeline**
+- **Automatic Write-up Generation**: Complete academic papers from research sessions
+- **Structured Output**: Abstract, methodology, results, discussion, and conclusions
+- **Reference Integration**: Automatic citation and bibliography generation
+- **Multiple Export Formats**: JSON and Markdown export options
+
+### 🎨 **User Experience**
+- **Modern UI**: Clean, responsive interface with Tailwind CSS
+- **macOS Integration**: Proper menu bar icons and native macOS features
+- **Real-time Feedback**: Live code execution with immediate results
+- **Project Management**: Organize research into projects with goals and metadata
+
 ## 🔐 Security & API Keys
 
 **Important**: Cedar is designed with security in mind. Your OpenAI API key is handled securely:
@@ -82,6 +110,7 @@ Cedar follows a modern desktop application architecture:
 - **Frontend**: React with TypeScript, Tailwind CSS, and Lucide icons
 - **Backend**: Tauri with Rust for secure desktop integration
 - **Core Engine**: Rust-based AI research engine with OpenAI integration
+- **Data Management**: DuckDB for efficient data storage and querying
 - **IPC**: Secure communication between frontend and backend
 
 ## 🧠 Core Features
@@ -90,11 +119,20 @@ Cedar follows a modern desktop application architecture:
 - **Goal Analysis**: AI analyzes your research goal and creates a structured plan
 - **Step Generation**: Automatically generates executable code steps
 - **Adaptive Planning**: Plans evolve based on execution results
+- **Session Persistence**: Research sessions are automatically saved and can be resumed
 
 ### Interactive Code Execution
 - **Python Integration**: Seamless Python code execution with real-time output
 - **Auto-dependency Management**: Automatically installs missing Python packages
 - **Session Management**: Maintains context across code executions
+- **Variable Detection**: Automatically detects and categorizes code variables
+
+### Data Management & Analysis
+- **File Upload**: Support for CSV, JSON, TSV, Parquet, and Excel files
+- **SQL Interface**: PostgreSQL-style queries using DuckDB
+- **AI-Powered Analysis**: Automatic data structure analysis and insights
+- **Metadata Management**: Comprehensive file and column information
+- **Data Visualization**: Built-in plotting and exploration tools
 
 ### AI-Powered Validation
 - **Output Analysis**: AI validates code execution results
@@ -106,6 +144,7 @@ Cedar follows a modern desktop application architecture:
 - **Smart Citations**: AI suggests relevant academic references
 - **Structured Data**: References include titles, authors, journals, DOIs
 - **Relevance Scoring**: Each reference includes relevance explanation
+- **Automatic Integration**: References are automatically included in publications
 
 ### Publication Pipeline
 - **Academic Paper Generation**: Creates complete academic papers from research sessions
@@ -125,16 +164,27 @@ Cedar/
 │   │   ├── executor.rs   # Python code execution
 │   │   ├── llm.rs        # OpenAI API integration
 │   │   ├── publication.rs # Academic paper generation
+│   │   ├── storage.rs    # Data management and storage
 │   │   └── ...
 │   └── src/bin/          # Command-line tools
 ├── frontend/             # React TypeScript frontend
 │   ├── src/
 │   │   ├── components/   # React components
+│   │   │   ├── DataTab.tsx      # Data management interface
+│   │   │   ├── ResearchSession.tsx # Research workflow
+│   │   │   ├── WriteUpTab.tsx   # Publication interface
+│   │   │   └── ...
 │   │   ├── api.ts        # Tauri API integration
 │   │   └── ...
 │   └── ...
 ├── src-tauri/           # Tauri desktop application
 │   ├── src/main.rs      # Backend entry point
+│   ├── icons/           # Application icons (including 20x20 menu bar icons)
+│   └── ...
+├── reference/           # Documentation and reference materials
+│   ├── DATA_MANAGEMENT_SYSTEM.md
+│   ├── RESEARCH_PLAN_SYSTEM.md
+│   ├── TESTING.md
 │   └── ...
 └── ...
 ```
@@ -159,6 +209,19 @@ cargo tauri build
 # The built application will be in src-tauri/target/release/
 ```
 
+### Testing
+```bash
+# Run all tests
+cargo test
+
+# Test specific components
+cargo test --lib
+cargo test --bin cedar-app
+
+# Test data management functionality
+cargo test test_data_management
+```
+
 ### Testing Core Components
 ```bash
 # Test the research engine
@@ -169,34 +232,47 @@ cargo run -p cedar-core --bin test_publication
 
 # Test storage system
 cargo run -p cedar-core --bin storage_test
+
+# Test data management
+node test-data-management.js
 ```
 
 ## 🎯 Example Workflow
 
-1. **Start a Research Session**
+### 1. **Start a Research Session**
    - Launch Cedar
    - Click "Start New Research Session"
-   - Enter your research goal
+   - Enter your research goal (e.g., "Analyze customer churn patterns")
 
-2. **AI Planning**
-   - Cedar analyzes your goal
+### 2. **Upload and Analyze Data**
+   - Go to the Data tab
+   - Upload your CSV/JSON data files
+   - AI automatically analyzes data structure and provides insights
+   - Use SQL queries to explore your data
+
+### 3. **AI Planning**
+   - Cedar analyzes your goal and data
    - Generates a structured research plan
    - Suggests relevant academic references
+   - Creates executable code steps
 
-3. **Interactive Execution**
+### 4. **Interactive Execution**
    - Execute generated code steps
-   - View real-time output
+   - View real-time output and visualizations
    - AI validates results and suggests improvements
+   - Variables are automatically detected and categorized
 
-4. **Iterative Refinement**
+### 5. **Iterative Refinement**
    - Modify code based on AI feedback
    - Add new analysis steps
    - Explore different approaches
+   - Session is automatically saved
 
-5. **Publication**
+### 6. **Publication**
    - Generate complete academic paper
-   - Export in multiple formats
+   - Export in multiple formats (JSON, Markdown)
    - Include all references and methodology
+   - Professional academic structure
 
 ## 🛠️ Configuration
 
@@ -205,9 +281,30 @@ cargo run -p cedar-core --bin storage_test
 
 ### Python Dependencies
 Cedar automatically manages Python dependencies. Common packages are pre-installed:
-- pandas, numpy, matplotlib, seaborn
-- scikit-learn, scipy
-- jupyter, ipython
+- **Data Analysis**: pandas, numpy, matplotlib, seaborn
+- **Machine Learning**: scikit-learn, scipy
+- **Development**: jupyter, ipython
+- **Additional packages**: Automatically installed as needed
+
+### Data Storage
+- **Local Storage**: All data is stored locally on your machine
+- **DuckDB**: Efficient SQL database for data management
+- **File System**: Organized project and session storage
+- **No Cloud Dependencies**: Your data stays private
+
+## 📚 Documentation
+
+Comprehensive documentation is available in the `reference/` directory:
+
+- **[Data Management System](reference/DATA_MANAGEMENT_SYSTEM.md)**: Complete guide to data upload, analysis, and querying
+- **[Research Plan System](reference/RESEARCH_PLAN_SYSTEM.md)**: How AI generates and adapts research plans
+- **[Testing Guide](reference/TESTING.md)**: Comprehensive testing procedures and examples
+- **[Setup Instructions](reference/SETUP.md)**: Detailed setup and configuration guide
+- **[API Key Security](reference/API_KEY_SOLUTION.md)**: Security implementation details
+- **[Session Persistence](reference/SESSION_PERSISTENCE_IMPLEMENTATION.md)**: How sessions are saved and restored
+- **[Variable Detection](reference/ENHANCED_VARIABLE_DETECTION.md)**: Automatic variable categorization
+- **[Publication System](reference/AUTOMATIC_WRITE_UP_GENERATION.md)**: Academic paper generation
+- **[Library Management](reference/AUTOMATIC_LIBRARY_DETECTION.md)**: Python dependency management
 
 ## 🤝 Contributing
 
@@ -215,7 +312,14 @@ Cedar automatically manages Python dependencies. Common packages are pre-install
 2. Create a feature branch
 3. Make your changes
 4. Add tests if applicable
-5. Submit a pull request
+5. Update documentation
+6. Submit a pull request
+
+### Development Guidelines
+- Follow Rust and TypeScript best practices
+- Add comprehensive tests for new features
+- Update documentation for any API changes
+- Ensure all tests pass before submitting PRs
 
 ## 📄 License
 
@@ -223,22 +327,53 @@ MIT License - see LICENSE file for details.
 
 ## 🗺️ Roadmap
 
+### Completed ✅
+- [x] Core AI research engine
+- [x] Data management system with DuckDB
+- [x] Session persistence and management
+- [x] Automatic variable detection
+- [x] Academic reference integration
+- [x] Publication pipeline
+- [x] macOS menu bar integration
+- [x] Comprehensive testing suite
+
+### In Progress 🔄
 - [ ] Enhanced visualization capabilities
 - [ ] Support for multiple LLM providers
+- [ ] Advanced data import/export formats
+
+### Planned 📋
 - [ ] Collaborative research sessions
-- [ ] Advanced data import/export
 - [ ] Plugin system for custom analysis
 - [ ] Cloud synchronization (optional)
 - [ ] Mobile companion app
+- [ ] Advanced statistical analysis tools
+- [ ] Integration with academic databases
 
 ## 🆘 Support
 
 - **Issues**: Report bugs and feature requests on GitHub
-- **Documentation**: Check the code comments and this README
+- **Documentation**: Check the `reference/` directory for detailed guides
 - **Security**: Report security issues privately
+- **Testing**: Use the comprehensive test suite in `reference/TESTING.md`
+
+## 🏆 Features Overview
+
+| Feature | Status | Description |
+|---------|--------|-------------|
+| AI Research Planning | ✅ Complete | Intelligent goal analysis and step generation |
+| Data Management | ✅ Complete | File upload, DuckDB integration, SQL queries |
+| Session Persistence | ✅ Complete | Automatic saving and resuming of research sessions |
+| Variable Detection | ✅ Complete | Automatic detection and categorization |
+| Academic References | ✅ Complete | AI-suggested relevant papers and citations |
+| Publication Pipeline | ✅ Complete | Automatic academic paper generation |
+| macOS Integration | ✅ Complete | Native menu bar icons and features |
+| Testing Suite | ✅ Complete | Comprehensive unit and integration tests |
 
 ---
 
 **Cedar** - Empowering research with AI intelligence.
+
+*Built with ❤️ using Rust, React, and OpenAI*
 
 

@@ -595,43 +595,15 @@ fn get_file_preview(content: &str, max_lines: usize) -> String {
 }
 
 /// Helper function to create DuckDB connection
-fn create_duckdb_connection(project_id: &str) -> Result<duckdb::Connection, String> {
-    let db_path = get_project_dir(project_id).join("data.db");
-    duckdb::Connection::open(&db_path)
-        .map_err(|e| format!("Failed to create DuckDB connection: {}", e))
+fn create_duckdb_connection(project_id: &str) -> Result<(), String> {
+    // Temporarily disabled until DuckDB is properly configured
+    Err("DuckDB not available".to_string())
 }
 
 /// Helper function to execute DuckDB query
-fn execute_duckdb_query(project_id: &str, query: &str) -> Result<Vec<Vec<String>>, String> {
-    let conn = create_duckdb_connection(project_id)?;
-    
-    let mut stmt = conn.prepare(query)
-        .map_err(|e| format!("Failed to prepare DuckDB query: {}", e))?;
-    
-    let mut rows = stmt.query([])
-        .map_err(|e| format!("Failed to execute DuckDB query: {}", e))?;
-    
-    let mut results = Vec::new();
-    
-    // Get column names
-    let column_names: Vec<String> = rows.column_names()
-        .iter()
-        .map(|name| name.to_string())
-        .collect();
-    results.push(column_names);
-    
-    // Get data rows
-    while let Some(row) = rows.next()
-        .map_err(|e| format!("Failed to fetch row: {}", e))? {
-        let row_data: Vec<String> = row.columns()
-            .map_err(|e| format!("Failed to get row columns: {}", e))?
-            .iter()
-            .map(|val| val.to_string())
-            .collect();
-        results.push(row_data);
-    }
-    
-    Ok(results)
+async fn execute_duckdb_query(project_id: &str, query: &str) -> Result<Vec<Vec<String>>, String> {
+    // Temporarily disabled until DuckDB is properly configured
+    Err("DuckDB not available".to_string())
 }
 
 /// Automatically categorize AI-generated content into project tabs
@@ -4280,6 +4252,7 @@ async fn execute_duckdb_query(
     
     // Execute the query
     let results = execute_duckdb_query(&request.project_id, &request.query)
+        .await
         .map_err(|e| format!("Query execution failed: {}", e))?;
     
     println!("✅ Backend: DuckDB query executed successfully");
@@ -4642,10 +4615,10 @@ fn main() {
             execute_step,
             generate_next_steps,
             // Data Management endpoints
-            upload_data_file,
-            analyze_data_file,
-            execute_duckdb_query,
-            list_data_files,
+            // upload_data_file,
+            // analyze_data_file,
+            // execute_duckdb_query,
+            // list_data_files,
             // API Testing endpoints
             test_api_endpoint,
             run_test_suite,
