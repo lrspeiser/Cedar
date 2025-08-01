@@ -320,20 +320,12 @@ const ProjectView: React.FC<ProjectViewProps> = ({ project, onBack }) => {
               )}
             </div>
           </div>
-          <div className="flex items-center space-x-2">
-            <button
-              onClick={refreshProjectData}
-              className="px-3 py-2 bg-cedar-500 text-white rounded-md hover:bg-cedar-600 transition-colors flex items-center space-x-2"
-            >
-              <span>🔄</span>
-              <span>Refresh</span>
-            </button>
+          <div className="flex items-center">
             <button
               onClick={() => setShowDeleteConfirm(true)}
-              className="px-3 py-2 bg-red-500 text-white rounded-md hover:bg-red-600 transition-colors flex items-center space-x-2"
+              className="text-red-600 hover:text-red-800 text-sm underline transition-colors"
             >
-              <span>🗑️</span>
-              <span>Delete Project</span>
+              Delete Project
             </button>
           </div>
         </div>
