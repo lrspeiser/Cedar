@@ -138,6 +138,13 @@ const ProjectView: React.FC<ProjectViewProps> = ({ project, onBack }) => {
             goal={project.goal}
             answers={researchAnswers}
             onContentGenerated={refreshProjectData}
+            onDataRouted={(result) => {
+              console.log('Data routed:', result);
+              // Refresh project data to show updated tabs
+              if (result.success) {
+                refreshProjectData();
+              }
+            }}
           />
         );
       case 'questions':
