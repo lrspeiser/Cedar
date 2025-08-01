@@ -3930,7 +3930,11 @@ Focus on academic rigor and comprehensive research planning."#,
         questions,
     };
     
-    println!("✅ Research initialized with title: '{}' and {} questions", initialization.title, initialization.questions.len());
+    // Automatically store references from research initialization
+    // Note: This would require a project_id parameter, but initialize_research doesn't have one
+    // The frontend will handle storing references via the DataRouterService
+    
+    println!("✅ Research initialized with title: '{}' and {} sources", initialization.title, initialization.sources.len());
     
     Ok(initialization)
 }
@@ -3989,12 +3993,20 @@ Each step MUST include:
 - Complete, runnable Python code (REQUIRED - cannot be empty)
 - Expected outputs and deliverables
 
-The plan should:
-- Skip literature review (already completed)
-- Focus on data processing and analysis
-- Include concrete code examples
-- Be immediately executable
-- Generate meaningful insights
+                The plan should:
+                - Skip literature review (already completed)
+                - Focus on data processing and analysis
+                - Include concrete code examples
+                - Be immediately executable
+                - Generate meaningful insights
+                - Create data that can be stored in our database
+                
+                DATA STORAGE INSTRUCTIONS:
+                - When creating DataFrames, arrays, or other data structures, use descriptive variable names
+                - Include print statements to show the data structure and content
+                - Use .to_csv(), .to_json(), or similar methods to save data when appropriate
+                - Add comments explaining what the data represents
+                - Our system will automatically detect and store created data in DuckDB tables
 
 IMPORTANT: Every step must have actual Python code that can be executed. Do not leave code fields empty.
 
