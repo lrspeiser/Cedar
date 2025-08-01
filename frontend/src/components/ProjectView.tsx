@@ -50,6 +50,16 @@ const ProjectView: React.FC<ProjectViewProps> = ({ project, onBack }) => {
   const [deleteConfirmation, setDeleteConfirmation] = useState('');
   const [isDeleting, setIsDeleting] = useState(false);
   const [researchAnswers] = useState<Record<string, string> | undefined>(project.researchAnswers);
+  const [researchGoal, setResearchGoal] = useState(project.goal || '');
+  const [isGeneratingTitle, setIsGeneratingTitle] = useState(false);
+  const [showGoalInput, setShowGoalInput] = useState(!project.goal);
+
+  // Auto-switch to notebook tab if project has an active session
+  useEffect(() => {
+    if (project.session_id && project.session_status === 'active') {
+      setActiveTab('notebook');
+    }
+  }, [project.session_id, project.session_status]);
 
   // Auto-start research if project has answers but no active session
   useEffect(() => {
@@ -94,6 +104,65 @@ const ProjectView: React.FC<ProjectViewProps> = ({ project, onBack }) => {
     { id: 'variables', label: 'Variables', icon: '📊' },
     { id: 'write-up', label: 'Write-Up', icon: '✍️' },
   ];
+
+  const generateProjectTitle = async (goal: string): Promise<string> => {
+    try {
+      // Use the existing initialize_research command to get a title
+      const response = await apiService.initializeResearch({
+        goal: goal
+      }) as any;
+      return response.title || 'Research Project';
+    } catch (error) {
+      console.error('Error generating title:', error);
+      return 'Research Project';
+    }
+  };
+
+  const handleResearchGoalSubmit = async () => {
+    if (!researchGoal.trim()) return;
+    
+    setIsGeneratingTitle(true);
+    
+    try {
+      // Generate project title
+      const title = await generateProjectTitle(researchGoal);
+      
+      // Update project with goal and title
+      const updatedProject = await apiService.updateProject(project.id, {
+        name: title,
+        goal: researchGoal
+      }) as Project;
+      
+      // Update local state
+      setProjectData(updatedProject);
+      setShowGoalInput(false);
+      
+      // Start research session
+      const sessionId = `session_${project.id}`;
+      
+      const response = await apiService.startResearch({
+        projectId: project.id,
+        sessionId: sessionId,
+        goal: researchGoal,
+        answers: {}
+      });
+
+      // Update project with session info
+      const finalProject = {
+        ...updatedProject,
+        session_id: sessionId,
+        session_status: 'active'
+      };
+      
+      setProjectData(finalProject);
+      
+    } catch (error) {
+      console.error('Failed to start research:', error);
+      alert('Failed to start research. Please try again.');
+    } finally {
+      setIsGeneratingTitle(false);
+    }
+  };
 
   const refreshProjectData = async () => {
     try {
@@ -214,9 +283,41 @@ const ProjectView: React.FC<ProjectViewProps> = ({ project, onBack }) => {
             >
               ← Back to Projects
             </button>
-            <div>
-              <h1 className="text-2xl font-bold text-gray-900">{project.name}</h1>
-              <p className="text-gray-600">{project.goal}</p>
+            <div className="flex-1 mx-8">
+              {showGoalInput ? (
+                <div className="flex items-center space-x-4">
+                  <div className="flex-1">
+                    <input
+                      type="text"
+                      value={researchGoal}
+                      onChange={(e) => setResearchGoal(e.target.value)}
+                      placeholder="What would you like to research?"
+                      className="w-full px-4 py-2 border border-gray-300 rounded-md focus:ring-cedar-500 focus:border-cedar-500"
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') {
+                          handleResearchGoalSubmit();
+                        }
+                      }}
+                    />
+                  </div>
+                  <button
+                    onClick={handleResearchGoalSubmit}
+                    disabled={!researchGoal.trim() || isGeneratingTitle}
+                    className="bg-cedar-500 text-white px-6 py-2 rounded-md hover:bg-cedar-600 disabled:opacity-50"
+                  >
+                    {isGeneratingTitle ? 'Creating Name...' : 'Start Research'}
+                  </button>
+                </div>
+              ) : (
+                <div className="text-center">
+                  <h1 className="text-2xl font-bold text-gray-900">
+                    {isGeneratingTitle ? 'Creating Name...' : projectData.name}
+                  </h1>
+                  {projectData.goal && (
+                    <p className="text-gray-600">{projectData.goal}</p>
+                  )}
+                </div>
+              )}
             </div>
           </div>
           <div className="flex items-center space-x-2">

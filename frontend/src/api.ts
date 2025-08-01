@@ -263,6 +263,18 @@ class ApiService {
     }
   }
 
+  async updateProject(projectId: string, updates: { name?: string; goal?: string }) {
+    console.log("🔧 Calling Tauri backend: update_project", { projectId, updates });
+    try {
+      const result = await invoke("update_project", { projectId, updates });
+      console.log("✅ Backend project updated successfully");
+      return result;
+    } catch (error) {
+      console.error("❌ Backend error updating project:", error);
+      throw error;
+    }
+  }
+
   /**
    * Project Management - Delete Project
    * 

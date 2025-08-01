@@ -35,7 +35,7 @@ interface CellComponentProps {
 }
 
 const CellComponent: React.FC<CellComponentProps> = ({ cell, onExecute, onQuestionAnswer }) => {
-  const [expanded, setExpanded] = useState(false);
+  const [expanded, setExpanded] = useState(true);
   const [answers, setAnswers] = useState<Record<string, string>>(cell.metadata?.answers || {});
 
   const handleExecute = () => {
@@ -265,13 +265,19 @@ const CellComponent: React.FC<CellComponentProps> = ({ cell, onExecute, onQuesti
                         {question.question}
                         {question.required && <span className="text-red-500 ml-1">*</span>}
                       </label>
-                      <textarea
-                        value={answers[question.id] || ''}
-                        onChange={(e) => handleQuestionAnswer(question.id, e.target.value)}
-                        placeholder="Enter your answer..."
-                        className="w-full p-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-orange-500 focus:border-transparent"
-                        rows={3}
-                      />
+                      {cell.status === 'completed' ? (
+                        <div className="p-2 bg-green-50 border border-green-200 rounded-md text-green-800">
+                          {answers[question.id] || 'Auto-reviewed'}
+                        </div>
+                      ) : (
+                        <textarea
+                          value={answers[question.id] || ''}
+                          onChange={(e) => handleQuestionAnswer(question.id, e.target.value)}
+                          placeholder="Enter your answer..."
+                          className="w-full p-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-orange-500 focus:border-transparent"
+                          rows={3}
+                        />
+                      )}
                     </div>
                   ))}
                 </div>

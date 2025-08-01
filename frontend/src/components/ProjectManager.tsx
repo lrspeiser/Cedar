@@ -1,6 +1,5 @@
 import React, { useState, useEffect } from 'react';
 import { apiService } from '../api';
-import IntegratedResearchFlow from './IntegratedResearchFlow';
 
 interface Project {
   id: string;
@@ -28,7 +27,6 @@ interface ProjectManagerProps {
 
 export const ProjectManager: React.FC<ProjectManagerProps> = ({ onProjectSelect, currentProject }) => {
   const [projects, setProjects] = useState<Project[]>([]);
-  const [showIntegratedFlow, setShowIntegratedFlow] = useState(false);
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
@@ -47,20 +45,22 @@ export const ProjectManager: React.FC<ProjectManagerProps> = ({ onProjectSelect,
     }
   };
 
-  const handleProjectComplete = async (project: Project) => {
+  const handleCreateNewProject = async () => {
     try {
       setLoading(true);
       
-      // Add the completed project to the list
-      setProjects(prev => [...prev, project]);
-      setShowIntegratedFlow(false);
+      // Create a placeholder project immediately
+      const placeholderProject = await apiService.createProject({
+        name: "Untitled Project",
+        goal: ""
+      }) as Project;
       
       // Auto-select the new project
-      onProjectSelect(project);
+      onProjectSelect(placeholderProject);
       
     } catch (error) {
-      console.error('Failed to handle project completion:', error);
-      alert('Failed to complete project');
+      console.error('Failed to create project:', error);
+      alert('Failed to create project');
     } finally {
       setLoading(false);
     }
@@ -75,19 +75,15 @@ export const ProjectManager: React.FC<ProjectManagerProps> = ({ onProjectSelect,
       <div className="flex justify-between items-center mb-6">
         <h2 className="text-2xl font-bold text-gray-800">Research Projects</h2>
         <button
-          onClick={() => setShowIntegratedFlow(true)}
-          className="bg-cedar-500 text-white px-4 py-2 rounded-md hover:bg-cedar-600 transition-colors"
+          onClick={handleCreateNewProject}
+          disabled={loading}
+          className="bg-cedar-500 text-white px-4 py-2 rounded-md hover:bg-cedar-600 transition-colors disabled:opacity-50"
         >
-          New Project
+          {loading ? 'Creating...' : 'New Project'}
         </button>
       </div>
 
-      {showIntegratedFlow && (
-        <IntegratedResearchFlow
-          onProjectComplete={handleProjectComplete}
-          onCancel={() => setShowIntegratedFlow(false)}
-        />
-      )}
+
 
       {loading && projects.length === 0 ? (
         <div className="text-center py-8">

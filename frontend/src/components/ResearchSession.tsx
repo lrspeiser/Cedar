@@ -66,7 +66,7 @@ import CellComponent from './CellComponent';
 
 interface Cell {
   id: string;
-  type: 'goal' | 'initialization' | 'questions' | 'plan' | 'code' | 'result' | 'visualization' | 'writeup' | 'data' | 'reference' | 'variable' | 'library' | 'title' | 'references' | 'abstract' | 'evaluation' | 'results';
+  type: 'goal' | 'initialization' | 'questions' | 'plan' | 'code' | 'result' | 'visualization' | 'writeup' | 'data' | 'reference' | 'variable' | 'library' | 'title' | 'references' | 'abstract' | 'evaluation' | 'results' | 'data_upload' | 'data_analysis' | 'data_metadata' | 'duckdb_query';
   content: string;
   timestamp: string;
   output?: string;
@@ -85,6 +85,10 @@ interface Cell {
     variables?: any[];
     libraries?: any[];
     visualizations?: any[];
+    fileInfo?: any;
+    analysisScript?: string;
+    metadata?: any;
+    queryResults?: any;
   };
   requiresUserAction?: boolean;
   canProceed?: boolean;
@@ -588,17 +592,23 @@ const ResearchSession: React.FC<ResearchSessionProps> = ({
         required: false,
       })) : [];
     
+    // Auto-answer all reference questions as "reviewed"
+    const autoAnswers = questions.reduce((acc, question) => {
+      acc[question.id] = 'Reference reviewed and ready for research';
+      return acc;
+    }, {} as Record<string, string>);
+    
     return {
       id: `questions-${Date.now()}`,
       type: 'questions',
-      content: 'Please review the references and answer any questions below:',
+      content: `References reviewed (${references.length} sources found):\n\n${references.map(ref => `• ${ref.title} by ${ref.authors}`).join('\n')}`,
       timestamp: new Date().toISOString(),
-      status: 'active',
-      requiresUserAction: true,
-      canProceed: false,
+      status: 'completed',
+      requiresUserAction: false,
+      canProceed: true,
       metadata: {
         questions,
-        answers: {},
+        answers: autoAnswers,
       },
     };
   };

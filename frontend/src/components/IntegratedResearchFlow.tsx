@@ -38,6 +38,8 @@ interface Project {
   variables: any[];
   questions: any[];
   libraries: any[];
+  session_id?: string;
+  session_status?: string;
 }
 
 interface IntegratedResearchFlowProps {
@@ -444,6 +446,33 @@ The analysis code executed successfully, establishing a solid foundation for fur
         }) as Project;
         setProject(newProject);
         setDataRouter(new DataRouterService(newProject.id));
+        
+        // Automatically start research session and complete project
+        try {
+          const sessionId = `session_${newProject.id}`;
+          
+          // Start research session
+          const response = await apiService.startResearch({
+            projectId: newProject.id,
+            sessionId: sessionId,
+            goal: userGoal,
+            answers: {}
+          });
+
+          // Update project with session info
+          const updatedProject = {
+            ...newProject,
+            session_id: sessionId,
+            session_status: 'active'
+          };
+          
+          // Complete the project immediately to take user to notebook
+          onProjectComplete(updatedProject);
+        } catch (error) {
+          console.error('Failed to start research session:', error);
+          // Still complete the project even if session start fails
+          onProjectComplete(newProject);
+        }
         break;
 
       case 'references':

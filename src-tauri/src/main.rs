@@ -1858,6 +1858,37 @@ async fn delete_project(
 }
 
 #[tauri::command]
+async fn update_project(
+    project_id: String,
+    updates: serde_json::Value,
+    state: State<'_, AppState>,
+) -> Result<Project, String> {
+    println!("📝 Backend: Updating project: {}", project_id);
+    
+    let mut projects = state.projects.lock().unwrap();
+    let project = projects.get_mut(&project_id)
+        .ok_or_else(|| format!("Project not found: {}", project_id))?;
+    
+    // Update fields if provided
+    if let Some(name) = updates.get("name").and_then(|v| v.as_str()) {
+        project.name = name.to_string();
+    }
+    
+    if let Some(goal) = updates.get("goal").and_then(|v| v.as_str()) {
+        project.goal = goal.to_string();
+    }
+    
+    // Update timestamp
+    project.updated_at = chrono::Utc::now().to_rfc3339();
+    
+    // Save to disk
+    save_project(project)?;
+    
+    println!("✅ Backend: Project updated successfully");
+    Ok(project.clone())
+}
+
+#[tauri::command]
 async fn save_file(
     request: SaveFileRequest,
     state: State<'_, AppState>,
@@ -3846,57 +3877,53 @@ async fn generate_research_plan(
     
     // Generate research plan using LLM
     let prompt = format!(
-        r#"Based on this research goal and context, generate a comprehensive research plan:
+        r#"Based on the research goal and collected data, create an implementation plan focused on code and data analysis:
 
 RESEARCH GOAL: "{}"
 
-USER ANSWERS:
-{}
+COLLECTED DATA:
+- References: {} sources found
+- Background: {}
+- User Input: {}
 
-ACADEMIC SOURCES:
-{}
+Create a practical implementation plan with these requirements:
 
-BACKGROUND SUMMARY:
-{}
+1. PLAN TITLE: Short, action-oriented title (5 words max)
+2. PLAN DESCRIPTION: Brief overview of the implementation approach
+3. IMPLEMENTATION STEPS: Focused on data analysis and code execution
 
-Generate a detailed research plan with the following structure:
+Each step must include:
+- Specific, actionable title
+- Clear description of what the code will accomplish
+- Complete, runnable Python code
+- Expected outputs and deliverables
 
-1. PLAN TITLE: A concise, descriptive title for the research plan
-2. PLAN DESCRIPTION: A comprehensive overview of the research approach and methodology
-3. RESEARCH STEPS: A numbered list of specific steps to execute the research
-
-Each step should include:
-- Step title (descriptive and specific)
-- Step description (what will be accomplished)
-- Python code (if applicable for data analysis, visualization, etc.)
-- Clear deliverables or outcomes
-
-The plan should be:
-- Logical and sequential
-- Comprehensive but not overwhelming
-- Focused on the selected research directions
-- Practical and executable
-- Based on the academic sources and background
+The plan should:
+- Skip literature review (already completed)
+- Focus on data processing and analysis
+- Include concrete code examples
+- Be immediately executable
+- Generate meaningful insights
 
 Return ONLY a JSON object:
 {{
     "id": "plan_{}",
-    "title": "Research Plan Title",
-    "description": "Comprehensive description of the research approach...",
+    "title": "Implementation Plan",
+    "description": "Focused implementation plan for data analysis...",
     "steps": [
         {{
             "id": "step_1",
-            "title": "Data Collection and Preparation",
-            "description": "Collect and prepare the dataset for analysis...",
-            "code": "import pandas as pd\nimport numpy as np\n\n# Load and prepare data\ndata = pd.read_csv('data.csv')\nprint('Data loaded successfully')\nprint(f'Shape: {{data.shape}}')",
+            "title": "Data Setup and Loading",
+            "description": "Prepare the data environment and load required datasets...",
+            "code": "import pandas as pd\\nprint('Data loaded successfully')",
             "status": "pending",
             "order": 1
         }},
         {{
             "id": "step_2", 
-            "title": "Exploratory Data Analysis",
-            "description": "Perform initial data exploration and visualization...",
-            "code": "import matplotlib.pyplot as plt\nimport seaborn as sns\n\n# Create visualizations\nplt.figure(figsize=(12, 8))\nsns.heatmap(data.corr(), annot=True)\nplt.title('Correlation Matrix')\nplt.show()",
+            "title": "Data Analysis",
+            "description": "Perform core analysis based on research goal...",
+            "code": "# Analyze data\\nprint('Analysis complete')",
             "status": "pending",
             "order": 2
         }}
@@ -3905,11 +3932,11 @@ Return ONLY a JSON object:
     "status": "ready"
 }}
 
-Focus on creating a practical, executable research plan that will lead to meaningful insights."#,
+Focus on creating executable code that directly addresses the research goal."#,
         request.goal,
-        serde_json::to_string_pretty(&request.answers).unwrap_or_else(|_| "{}".to_string()),
-        request.sources.iter().map(|s| format!("- {} by {}: {}", s.title, s.authors, s.summary)).collect::<Vec<_>>().join("\n"),
+        request.sources.len(),
         request.background_summary,
+        serde_json::to_string_pretty(&request.answers).unwrap_or_else(|_| "{}".to_string()),
         chrono::Utc::now().timestamp(),
         chrono::Utc::now().to_rfc3339()
     );
@@ -5201,6 +5228,7 @@ fn main() {
             create_project,
             get_projects,
             get_project,
+            update_project,
             delete_project,
             save_file,
             update_session,
@@ -5231,11 +5259,11 @@ fn main() {
             delete_visualization,
             generate_visualization,
             // Data Management endpoints
-            upload_data_file,
-            upload_data_file_with_notebook,
-            analyze_data_file,
-            execute_duckdb_query,
-            list_data_files,
+            // upload_data_file,
+            // upload_data_file_with_notebook,
+            // analyze_data_file,
+            // execute_duckdb_query,
+            // list_data_files,
             // API Testing endpoints
             test_api_endpoint,
             run_test_suite,
