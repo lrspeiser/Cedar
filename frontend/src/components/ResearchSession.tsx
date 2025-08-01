@@ -66,7 +66,7 @@ import CellComponent from './CellComponent';
 
 interface Cell {
   id: string;
-  type: 'goal' | 'initialization' | 'questions' | 'plan' | 'code' | 'result' | 'visualization' | 'writeup' | 'data' | 'reference' | 'variable' | 'library' | 'title' | 'references' | 'abstract' | 'evaluation' | 'results' | 'data_upload' | 'data_analysis' | 'data_metadata' | 'duckdb_query' | 'phase' | 'title_created';
+  type: 'goal' | 'initialization' | 'questions' | 'plan' | 'code' | 'result' | 'visualization' | 'writeup' | 'data' | 'reference' | 'variable' | 'library' | 'title' | 'references' | 'abstract' | 'evaluation' | 'results' | 'data_upload' | 'data_analysis' | 'data_metadata' | 'duckdb_query' | 'phase' | 'title_created' | 'data_assessment' | 'data_collection' | 'analysis_plan' | 'analysis_execution' | 'progress_log';
   content: string;
   timestamp: string;
   output?: string;
@@ -90,6 +90,9 @@ interface Cell {
     metadata?: any;
     queryResults?: any;
     threadId?: string; // Added for multi-threading
+    // Streaming support
+    streamLines?: string[];
+    isStreaming?: boolean;
   };
   requiresUserAction?: boolean;
   canProceed?: boolean;
@@ -413,6 +416,12 @@ const ResearchSession: React.FC<ResearchSessionProps> = ({
   const [executionThreads, setExecutionThreads] = useState<Map<string, ExecutionThread>>(new Map());
   const [activeThreadId, setActiveThreadId] = useState<string | null>(null);
   
+  // Streaming support
+  const [streamingCells, setStreamingCells] = useState<Set<string>>(new Set());
+  
+  // Session state tracking
+  const [sessionLoaded, setSessionLoaded] = useState(false);
+
   // Legacy execution progress (for backward compatibility)
   const [executionProgress, setExecutionProgress] = useState<{
     currentStep: number;
@@ -438,9 +447,9 @@ const ResearchSession: React.FC<ResearchSessionProps> = ({
     writeUpGenerated: false,
   });
 
-  // Initialize with goal cell if goal is provided
+  // Initialize with goal cell if goal is provided and no session exists
   useEffect(() => {
-    if (goal && cells.length === 0) {
+    if (goal && cells.length === 0 && !sessionId) {
       const goalCell: Cell = {
         id: 'goal-1',
         type: 'goal',
@@ -453,41 +462,47 @@ const ResearchSession: React.FC<ResearchSessionProps> = ({
       setCells([goalCell]);
       handleNextStep(goalCell);
     }
-  }, [goal, cells.length]);
+  }, [goal, cells.length, sessionId]);
+
+  // Reset session state when sessionId changes
+  useEffect(() => {
+    if (sessionId) {
+      console.log('🔄 Session ID changed, resetting state:', sessionId);
+      resetSessionState();
+    }
+  }, [sessionId]);
 
   // Load existing session
   useEffect(() => {
-    if (sessionId) {
+    if (sessionId && !sessionLoaded) {
+      console.log('🔄 Loading session for the first time:', sessionId);
       loadSession();
       // Reset loading state when loading a session to prevent stuck states
       setIsLoading(false);
     }
-  }, [sessionId]);
+  }, [sessionId, sessionLoaded]);
 
   // Auto-refresh session when research starts or when there are active cells
   useEffect(() => {
     const hasActiveCells = cells.some(cell => cell.status === 'active' || cell.status === 'pending');
-    const shouldPoll = (isResearchStarting || hasActiveCells) && sessionId;
+    const shouldPoll = (isResearchStarting || hasActiveCells) && sessionId && sessionLoaded;
     
     if (shouldPoll) {
       console.log('🔍 Starting/continuing session polling for session:', sessionId, 
         isResearchStarting ? '(research starting)' : '(active cells)');
       
-      // Immediate load attempt
-      loadSession();
-      
       // Set up polling to check for session updates
       const pollInterval = setInterval(() => {
         console.log('🔄 Polling for session updates...');
         loadSession();
-      }, 1500); // Check every 1.5 seconds for faster response
+      }, 2000); // Check every 2 seconds to reduce load
       
       return () => {
         console.log('🛑 Stopping session polling');
         clearInterval(pollInterval);
       };
     }
-  }, [isResearchStarting, sessionId, cells]);
+  }, [isResearchStarting, sessionId, cells, sessionLoaded]);
 
   // Stop polling when we have cells and research is no longer starting
   useEffect(() => {
@@ -535,35 +550,46 @@ const ResearchSession: React.FC<ResearchSessionProps> = ({
       const session = await apiService.loadSession(sessionId) as any;
       console.log('📦 Session loaded:', session ? 'found' : 'not found', session?.cells?.length || 0, 'cells');
       
-      if (session && session.cells) {
-        // Reset any stuck cells (active or pending status that shouldn't be)
-        const cleanedCells = session.cells.map((cell: Cell) => {
-          // If a cell has been in active/pending status for more than 5 minutes, reset it
-          const cellTime = new Date(cell.timestamp).getTime();
-          const now = Date.now();
-          const timeDiff = now - cellTime;
+      if (session && session.cells && session.cells.length > 0) {
+        // Only update cells if we don't have any cells or if the session has more cells
+        if (cells.length === 0 || session.cells.length > cells.length) {
+          console.log('📝 Updating cells from session:', session.cells.length, 'cells');
           
-          if ((cell.status === 'active' || cell.status === 'pending') && timeDiff > 5 * 60 * 1000) {
-            console.log(`Resetting stuck cell ${cell.id} from ${cell.status} to completed`);
-            return {
-              ...cell,
-              status: 'completed' as const,
-              timestamp: new Date().toISOString()
-            };
-          }
+          // Reset any stuck cells (active or pending status that shouldn't be)
+          const cleanedCells = session.cells.map((cell: Cell) => {
+            // If a cell has been in active/pending status for more than 5 minutes, reset it
+            // BUT don't reset initialization or data_assessment cells that are actively showing progress
+            const cellTime = new Date(cell.timestamp).getTime();
+            const now = Date.now();
+            const timeDiff = now - cellTime;
+            
+            if ((cell.status === 'active' || cell.status === 'pending') && 
+                timeDiff > 5 * 60 * 1000 && 
+                cell.type !== 'initialization' && 
+                cell.type !== 'data_assessment') {
+              console.log(`Resetting stuck cell ${cell.id} from ${cell.status} to completed`);
+              return {
+                ...cell,
+                status: 'completed' as const,
+                timestamp: new Date().toISOString()
+              };
+            }
+            
+            // Ensure goal cells can proceed to next step
+            if (cell.type === 'goal' && cell.status === 'completed') {
+              return {
+                ...cell,
+                canProceed: true
+              };
+            }
+            
+            return cell;
+          });
           
-          // Ensure goal cells can proceed to next step
-          if (cell.type === 'goal' && cell.status === 'completed') {
-            return {
-              ...cell,
-              canProceed: true
-            };
-          }
-          
-          return cell;
-        });
-        
-        setCells(cleanedCells);
+          setCells(cleanedCells);
+        } else {
+          console.log('📝 Skipping cell update - current cells:', cells.length, 'session cells:', session.cells.length);
+        }
         
         // Update execution progress if available
         if (session.executionProgress) {
@@ -574,6 +600,12 @@ const ResearchSession: React.FC<ResearchSessionProps> = ({
         if (session.researchPlan) {
           setResearchPlan(session.researchPlan);
         }
+        
+        // Mark session as loaded
+        setSessionLoaded(true);
+      } else {
+        console.log('📝 No session data or empty session');
+        setSessionLoaded(true);
       }
 
       // Load execution threads
@@ -611,9 +643,19 @@ const ResearchSession: React.FC<ResearchSessionProps> = ({
         timestamp: new Date().toISOString(),
       };
       await apiService.saveSession(sessionId, sessionData);
+      console.log('💾 Session saved with', updatedCells.length, 'cells');
     } catch (error) {
       console.error('Failed to save session:', error);
     }
+  };
+
+  const resetSessionState = () => {
+    console.log('🔄 Resetting session state');
+    setSessionLoaded(false);
+    setCells([]);
+    setExecutionThreads(new Map());
+    setActiveThreadId(null);
+    setStreamingCells(new Set());
   };
 
   // Create a new execution thread
@@ -765,57 +807,73 @@ const ResearchSession: React.FC<ResearchSessionProps> = ({
         
           
         case 'abstract':
-          // Skip questions, go directly to plan
-          nextCell = await generatePlanCell({});
+          // Start data assessment instead of plan
+          nextCell = await generateDataAssessmentCell();
           break;
           
-        case 'plan':
-          // Generate first phase cell
-          if (currentCell.metadata?.plan) {
-            nextCell = await generatePhaseCell(currentCell.metadata.plan, 0);
-          }
-          break;
-          
-        case 'phase':
-          console.log('🔍 Processing phase cell');
-          // Generate execution cell for this phase
-          if (currentCell.metadata?.plan) {
-            console.log('🔍 Plan found in metadata:', currentCell.metadata.plan);
-            const phaseIndex = currentCell.metadata.stepOrder || 0;
-            const phase = currentCell.metadata.plan.steps[phaseIndex];
-            console.log('🔍 Phase index:', phaseIndex, 'Phase:', phase);
-            if (phase) {
-              nextCell = {
-                id: `code-${phase.id}`,
-                type: 'code',
-                content: phase.code || `# ${phase.title}\n${phase.description}`,
-                timestamp: new Date().toISOString(),
-                status: 'active',
-                requiresUserAction: true,
-                canProceed: true,
-                metadata: {
-                  stepId: phase.id,
-                  stepOrder: phaseIndex,
-                  totalSteps: currentCell.metadata.plan.steps.length,
-                  phase: phase,
-                },
-              };
-            } else {
-              console.error('❌ Phase not found at index:', phaseIndex);
-            }
+        case 'data_assessment':
+          // Evaluate existing data and determine next steps
+          const existingDataFiles = currentCell.metadata?.existingDataFiles || [];
+          if (existingDataFiles.length > 0) {
+            // We have data, proceed to analysis planning
+            nextCell = await generateAnalysisPlanCell();
           } else {
-            console.error('❌ No plan found in phase cell metadata');
+            // No data, need to collect data
+            nextCell = await generateDataCollectionCell("Data needed for research goal");
           }
+          break;
+          
+        case 'data_collection':
+          // After data collection, proceed to analysis planning
+          nextCell = await generateAnalysisPlanCell();
+          break;
+          
+        case 'analysis_plan':
+          // Generate analysis execution cell
+          nextCell = await generateAnalysisExecutionCell();
           break;
           
         case 'code':
+        case 'analysis_execution':
           // Execute code and generate result
           nextCell = await executeCodeAndGenerateResult(currentCell);
           break;
           
         case 'result':
-          // Generate next step or writeup
-          nextCell = await generateNextStepOrWriteup(currentCell);
+          // For the new data-driven workflow, generate final writeup after analysis
+          try {
+            // Get all execution results from the session
+            const executionResults = cells
+              .filter(cell => cell.type === 'result' && cell.metadata?.executionResults)
+              .flatMap(cell => cell.metadata.executionResults || []);
+            
+            // Generate comprehensive write-up using backend
+            const writeUpContent = await generateFinalWriteUp(executionResults);
+            
+            // Store the write-up in the write-up tab
+            await dataRouter.routeWriteUp(writeUpContent);
+            
+            nextCell = {
+              id: `writeup-${Date.now()}`,
+              type: 'writeup',
+              content: writeUpContent,
+              timestamp: new Date().toISOString(),
+              status: 'completed',
+              requiresUserAction: false,
+              canProceed: false,
+            };
+          } catch (error) {
+            console.error('Failed to generate write-up:', error);
+            nextCell = {
+              id: `writeup-${Date.now()}`,
+              type: 'writeup',
+              content: 'Error generating final research write-up. Please check the console for details.',
+              timestamp: new Date().toISOString(),
+              status: 'error',
+              requiresUserAction: false,
+              canProceed: false,
+            };
+          }
           break;
           
         default:
@@ -925,33 +983,157 @@ const ResearchSession: React.FC<ResearchSessionProps> = ({
     }
   };
 
-  const generateInitializationCell = async (goal: string): Promise<Cell> => {
-    const initialization = await apiService.initializeResearch({ goal }) as any;
-    
-    // Store references in the references tab
-    if (initialization.sources && initialization.sources.length > 0) {
-      try {
-        await dataRouter.routeReferences(initialization.sources);
-        console.log('✅ References stored in references tab');
-      } catch (error) {
-        console.error('Failed to store references:', error);
-      }
-    }
-    
+  const createProgressLogCell = (message: string, isActive: boolean = false): Cell => {
     return {
+      id: `progress-log-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+      type: 'progress_log',
+      content: message,
+      timestamp: new Date().toISOString(),
+      status: isActive ? 'active' : 'completed',
+      requiresUserAction: false,
+      canProceed: false,
+    };
+  };
+
+  const updateProgressLog = (currentCells: Cell[], logId: string, newMessage: string, isActive: boolean = false): Cell[] => {
+    return currentCells.map(cell => 
+      cell.id === logId 
+        ? { ...cell, content: newMessage, status: isActive ? 'active' : 'completed' }
+        : cell
+    );
+  };
+
+  const generateInitializationCell = async (goal: string): Promise<Cell> => {
+    // Create the initialization cell with initial content
+    const initializationCell: Cell = {
       id: `initialization-${Date.now()}`,
       type: 'initialization',
-      content: `Research Initialization for: ${goal}\n\nFound ${initialization.sources?.length || 0} relevant research sources.`,
+      content: `# Research Initialization Progress\n\n**Goal**: ${goal}\n\n`,
       timestamp: new Date().toISOString(),
-      status: 'completed',
+      status: 'active',
       requiresUserAction: false,
-      canProceed: true,
+      canProceed: false,
       metadata: {
-        references: initialization.sources,
-        questions: initialization.questions,
-        background_summary: initialization.background_summary,
+        goal,
+        streamLines: [],
+        isStreaming: true,
       },
     };
+    
+    // Add the cell to the UI immediately
+    const updatedCells = [...cells, initializationCell];
+    console.log('🔍 Adding initialization cell to UI:', initializationCell.id);
+    setCells(updatedCells);
+    await saveSession(updatedCells);
+    
+    try {
+      // Stream the progress updates
+      await streamLines(initializationCell.id, [
+        '## Step 1: 🔄 Starting Research Initialization...',
+        '',
+        '🔍 Connecting to LLM service...',
+        '📡 Establishing connection...',
+        '✅ Connection established',
+        '',
+        '## Step 2: 🔄 Calling LLM for Research Sources...',
+        '',
+        '🤖 Generating research sources and background information...',
+        '🧠 Processing research goal...',
+        '📚 Searching academic databases...',
+        '🔍 Analyzing relevant literature...',
+      ], 150);
+      
+      // Call the LLM with context
+      const initialization = await makeContextualLLMCall('initialization', initializationCell.id) as any;
+      
+      // Stream the results
+      await streamLines(initializationCell.id, [
+        '✅ LLM processing complete',
+        '',
+        '## Step 3: 🔄 Processing Results...',
+        '',
+        `📚 Found ${initialization.sources?.length || 0} research sources`,
+        '📝 Generating background summary...',
+        '🔗 Organizing references...',
+      ], 100);
+      
+      // Store references in the references tab
+      if (initialization.sources && initialization.sources.length > 0) {
+        try {
+          await dataRouter.routeReferences(initialization.sources);
+          await streamLines(initializationCell.id, [
+            '✅ References stored in References tab',
+          ], 50);
+        } catch (error) {
+          console.error('Failed to store references:', error);
+          await streamLines(initializationCell.id, [
+            '⚠️ Warning: Failed to store some references',
+          ], 50);
+        }
+      }
+      
+      // Stream completion
+      await streamLines(initializationCell.id, [
+        '',
+        '## Step 4: ✅ Research Initialization Complete!',
+        '',
+        `📚 **${initialization.sources?.length || 0} research sources** found and stored`,
+        '📝 **Background summary** generated',
+        '🔗 **References** routed to References tab',
+        '',
+        '**Next**: Proceeding to data assessment...',
+      ], 100);
+      
+      // Update the cell to completed status
+      const finalCells = cells.map(cell => 
+        cell.id === initializationCell.id 
+          ? { 
+              ...cell, 
+              status: 'completed' as const,
+              canProceed: true,
+              metadata: {
+                ...cell.metadata,
+                references: initialization.sources,
+                questions: initialization.questions,
+                background_summary: initialization.background_summary,
+                goal,
+                isStreaming: false,
+              },
+            }
+          : cell
+      );
+      setCells(finalCells);
+      await saveSession(finalCells);
+      
+      return finalCells.find(cell => cell.id === initializationCell.id)!;
+    } catch (error) {
+      // Stream error
+      await streamLines(initializationCell.id, [
+        '',
+        '## ❌ Error During Initialization',
+        '',
+        `**Error**: ${error}`,
+        '',
+        'Please check your API key and try again.',
+      ], 100);
+      
+      // Update the cell to error status
+      const errorCells = cells.map(cell => 
+        cell.id === initializationCell.id 
+          ? { 
+              ...cell, 
+              status: 'error' as const,
+              metadata: {
+                ...cell.metadata,
+                isStreaming: false,
+              },
+            }
+          : cell
+      );
+      setCells(errorCells);
+      await saveSession(errorCells);
+      throw error;
+    }
   };
 
   const generateAbstractCell = async (goal: string, backgroundSummary: string): Promise<Cell> => {
@@ -979,81 +1161,604 @@ const ResearchSession: React.FC<ResearchSessionProps> = ({
     };
   };
 
-  const generatePlanCell = async (answers: Record<string, string>): Promise<Cell> => {
-    const plan = await apiService.generateResearchPlan({
-      goal: goal, // Use the current goal from props
-      answers,
-      sources: [],
-      background_summary: '',
-    }) as any;
+  const generateDataAssessmentCell = async (): Promise<Cell> => {
+    console.log('🔍 Starting data assessment for goal:', goal);
     
-    setResearchPlan(plan);
-    
-    return {
-      id: `plan-${Date.now()}`,
-      type: 'plan',
-      content: `Research Plan: ${plan.title}\n\n${plan.description}\n\nPhases:\n${plan.steps.map((step: any, i: number) => `${i + 1}. ${step.title}`).join('\n')}`,
+    // Create the data assessment cell with initial content
+    const dataAssessmentCell: Cell = {
+      id: `data-assessment-${Date.now()}`,
+      type: 'data_assessment',
+      content: `# Data Assessment Progress\n\n**Goal**: ${goal}\n\n`,
       timestamp: new Date().toISOString(),
-      status: 'completed',
+      status: 'active',
       requiresUserAction: false,
-      canProceed: true,
+      canProceed: false,
       metadata: {
-        plan,
+        goal,
+        streamLines: [],
+        isStreaming: true,
       },
     };
+    
+    // Add the cell to the UI immediately
+    const updatedCells = [...cells, dataAssessmentCell];
+    setCells(updatedCells);
+    await saveSession(updatedCells);
+    
+    try {
+      // Get existing data files for this project
+      let existingDataFiles: any[] = [];
+      
+      // Stream the progress updates
+      await streamLines(dataAssessmentCell.id, [
+        '## Step 1: 🔄 Starting Data Assessment...',
+        '',
+        '🔍 Scanning project for existing data files...',
+        '📁 Checking project directory...',
+        '🔎 Looking for data files...',
+        '',
+        '## Step 2: 🔄 Loading Data Files...',
+        '',
+        '📂 Accessing project storage...',
+        '📊 Scanning for data files...',
+      ], 120);
+      
+      try {
+        const dataFilesResponse = await apiService.listDataFiles({ projectId });
+        existingDataFiles = dataFilesResponse.data_files || [];
+        console.log('🔍 Found existing data files:', existingDataFiles.length);
+      } catch (error) {
+        console.log('🔍 No existing data files found or error loading them');
+      }
+      
+      // Make contextual LLM call for data assessment
+      const dataAssessment = await makeContextualLLMCall('data_assessment', dataAssessmentCell.id, {
+        existingDataFiles,
+        projectId
+      });
+
+      // Stream the results
+      await streamLines(dataAssessmentCell.id, [
+        `✅ Found ${existingDataFiles.length} data file(s)`,
+        '',
+        '## Step 3: 🔄 Analyzing Data with LLM...',
+        '',
+        '🤖 Consulting AI for data assessment...',
+        '🔍 Evaluating data relevance...',
+        '📋 Analyzing data requirements...',
+        '📊 Identifying data gaps...',
+      ], 100);
+      
+      // Stream the LLM assessment results
+      if (dataAssessment && dataAssessment.assessment) {
+        await streamLines(dataAssessmentCell.id, [
+          '',
+          '## AI Data Assessment Results:',
+          '',
+        ], 50);
+        
+        // Stream the LLM response in chunks
+        const assessmentLines = dataAssessment.assessment.split('\n');
+        for (const line of assessmentLines) {
+          if (line.trim()) {
+            await streamLines(dataAssessmentCell.id, [line], 30);
+          }
+        }
+      } else {
+        // Fallback to basic assessment
+        if (existingDataFiles.length > 0) {
+          await streamLines(dataAssessmentCell.id, [
+            '',
+            '## Existing Data Files Found:',
+            '',
+          ], 50);
+          
+          for (const file of existingDataFiles) {
+            await streamLines(dataAssessmentCell.id, [
+              `📄 **${file.filename}** (${file.file_type})`,
+            ], 50);
+            
+            if (file.metadata?.description) {
+              await streamLines(dataAssessmentCell.id, [
+                `   📝 ${file.metadata.description}`,
+              ], 30);
+            }
+            
+            if (file.metadata?.columns) {
+              await streamLines(dataAssessmentCell.id, [
+                `   📊 Columns: ${file.metadata.columns.join(', ')}`,
+              ], 30);
+            }
+            
+            await streamLines(dataAssessmentCell.id, [''], 20);
+          }
+        } else {
+          await streamLines(dataAssessmentCell.id, [
+            '',
+            '## No Existing Data Files Found',
+            '',
+            'We need to determine what data is required for this research.',
+          ], 100);
+        }
+      }
+      
+      // Stream completion
+      await streamLines(dataAssessmentCell.id, [
+        '',
+        '## Step 4: ✅ Data Assessment Complete!',
+        '',
+        `📊 **${existingDataFiles.length} data file(s)** found`,
+        '🔍 **Data evaluation** completed',
+        '📋 **Assessment report** generated',
+        '',
+        `**Next**: ${existingDataFiles.length > 0 ? 'Proceeding to analysis planning...' : 'Proceeding to data collection...'}`,
+      ], 100);
+      
+      // Update the cell to completed status
+      const finalCells = cells.map(cell => 
+        cell.id === dataAssessmentCell.id 
+          ? { 
+              ...cell, 
+              status: 'completed' as const,
+              canProceed: true,
+              metadata: {
+                ...cell.metadata,
+                existingDataFiles,
+                goal,
+                isStreaming: false,
+              },
+            }
+          : cell
+      );
+      setCells(finalCells);
+      await saveSession(finalCells);
+      
+      return finalCells.find(cell => cell.id === dataAssessmentCell.id)!;
+    } catch (error) {
+      // Stream error
+      await streamLines(dataAssessmentCell.id, [
+        '',
+        '## ❌ Error During Data Assessment',
+        '',
+        `**Error**: ${error}`,
+        '',
+        'Please try again.',
+      ], 100);
+      
+      // Update the cell to error status
+      const errorCells = cells.map(cell => 
+        cell.id === dataAssessmentCell.id 
+          ? { 
+              ...cell, 
+              status: 'error' as const,
+              metadata: {
+                ...cell.metadata,
+                isStreaming: false,
+              },
+            }
+          : cell
+      );
+      setCells(errorCells);
+      await saveSession(errorCells);
+      throw error;
+    }
   };
 
-  const generatePhaseCell = async (plan: any, phaseIndex: number): Promise<Cell> => {
-    if (!plan || !plan.steps || plan.steps.length === 0) {
-      throw new Error('No research plan available');
-    }
+  const generateDataCollectionCell = async (dataNeeded: string): Promise<Cell> => {
+    console.log('🔍 Starting data collection for:', dataNeeded);
     
-    if (phaseIndex >= plan.steps.length) {
-      throw new Error('Phase index out of bounds');
-    }
-    
-    const phase = plan.steps[phaseIndex];
-    
-    return {
-      id: `phase-${phase.id}`,
-      type: 'phase',
-      content: `Phase ${phaseIndex + 1}: ${phase.title}\n\n${phase.description}\n\nHere is what we will do:\n- ${phase.description}\n- The data we will need: Based on previous phases and research context\n- Example output we will get: ${phase.description.split('.').slice(0, 2).join('.')}...`,
+    // Create the data collection cell with initial content
+    const dataCollectionCell: Cell = {
+      id: `data-collection-${Date.now()}`,
+      type: 'data_collection',
+      content: `# Data Collection Progress\n\n**Goal**: ${goal}\n\n`,
       timestamp: new Date().toISOString(),
-      status: 'completed',
+      status: 'active',
       requiresUserAction: false,
-      canProceed: true,
+      canProceed: false,
       metadata: {
-        stepId: phase.id,
-        stepOrder: phaseIndex,
-        totalSteps: plan.steps.length,
-        phase: phase,
-        plan: plan,
+        dataNeeded,
+        goal,
+        streamLines: [],
+        isStreaming: true,
       },
     };
+    
+    // Add the cell to the UI immediately
+    const updatedCells = [...cells, dataCollectionCell];
+    setCells(updatedCells);
+    await saveSession(updatedCells);
+    
+    try {
+      // Stream the progress updates
+      await streamLines(dataCollectionCell.id, [
+        '## Step 1: 🔄 Starting Data Collection...',
+        '',
+        '🔍 Analyzing data requirements...',
+        '📋 Planning data collection strategy...',
+        '🤖 Consulting AI for data generation...',
+      ], 120);
+      
+      // Make contextual LLM call for data collection planning
+      const dataCollection = await makeContextualLLMCall('data_collection', dataCollectionCell.id, {
+        dataNeeded,
+        projectId
+      });
+      
+      // Stream the LLM response
+      if (dataCollection && dataCollection.plan) {
+        await streamLines(dataCollectionCell.id, [
+          '',
+          '## AI Data Collection Plan:',
+          '',
+        ], 50);
+        
+        // Stream the LLM response in chunks
+        const planLines = dataCollection.plan.split('\n');
+        for (const line of planLines) {
+          if (line.trim()) {
+            await streamLines(dataCollectionCell.id, [line], 30);
+          }
+        }
+      } else {
+        // Fallback content
+        await streamLines(dataCollectionCell.id, [
+          '',
+          '## Data Requirements',
+          `Based on the research goal, we need data that can help us: ${dataNeeded}`,
+          '',
+          '## Available Data Sources',
+          '1. **Generated Sample Data**: We can create synthetic data that matches the requirements',
+          '2. **Public Datasets**: We can suggest relevant public datasets',
+          '3. **API Data**: We can fetch data from public APIs',
+          '',
+          '## Next Steps',
+          'We will generate appropriate sample data and store it in the project\'s data section.',
+        ], 100);
+      }
+      
+      // Stream completion
+      await streamLines(dataCollectionCell.id, [
+        '',
+        '## Step 2: ✅ Data Collection Complete!',
+        '',
+        '📊 **Data requirements** analyzed',
+        '📋 **Collection strategy** planned',
+        '🤖 **AI recommendations** generated',
+        '',
+        '**Next**: Proceeding to analysis planning...',
+      ], 100);
+      
+      // Update the cell to completed status
+      const finalCells = cells.map(cell => 
+        cell.id === dataCollectionCell.id 
+          ? { 
+              ...cell, 
+              status: 'completed' as const,
+              canProceed: true,
+              metadata: {
+                ...cell.metadata,
+                dataNeeded,
+                goal,
+                collectionPlan: dataCollection?.plan,
+                isStreaming: false,
+              },
+            }
+          : cell
+      );
+      setCells(finalCells);
+      await saveSession(finalCells);
+      
+      return finalCells.find(cell => cell.id === dataCollectionCell.id)!;
+    } catch (error) {
+      // Stream error
+      await streamLines(dataCollectionCell.id, [
+        '',
+        '## ❌ Error During Data Collection',
+        '',
+        `**Error**: ${error}`,
+        '',
+        'Please try again.',
+      ], 100);
+      
+      // Update the cell to error status
+      const errorCells = cells.map(cell => 
+        cell.id === dataCollectionCell.id 
+          ? { 
+              ...cell, 
+              status: 'error' as const,
+              metadata: {
+                ...cell.metadata,
+                isStreaming: false,
+              },
+            }
+          : cell
+      );
+      setCells(errorCells);
+      await saveSession(errorCells);
+      throw error;
+    }
   };
 
-  const generateFirstExecutionCell = async (plan: any): Promise<Cell> => {
-    if (!plan || !plan.steps || plan.steps.length === 0) {
-      throw new Error('No research plan available');
+  const generateAnalysisPlanCell = async (): Promise<Cell> => {
+    console.log('🔍 Generating analysis plan for goal:', goal);
+    
+    // Create the analysis plan cell with initial content
+    const analysisPlanCell: Cell = {
+      id: `analysis-plan-${Date.now()}`,
+      type: 'analysis_plan',
+      content: `# Analysis Plan Progress\n\n**Goal**: ${goal}\n\n`,
+      timestamp: new Date().toISOString(),
+      status: 'active',
+      requiresUserAction: false,
+      canProceed: false,
+      metadata: {
+        goal,
+        streamLines: [],
+        isStreaming: true,
+      },
+    };
+    
+    // Add the cell to the UI immediately
+    const updatedCells = [...cells, analysisPlanCell];
+    setCells(updatedCells);
+    await saveSession(updatedCells);
+    
+    try {
+      // Stream the progress updates
+      await streamLines(analysisPlanCell.id, [
+        '## Step 1: 🔄 Starting Analysis Planning...',
+        '',
+        '🔍 Reviewing research context...',
+        '📊 Analyzing available data...',
+        '🤖 Consulting AI for analysis strategy...',
+      ], 120);
+      
+      // Get all available data files for analysis
+      let availableDataFiles: any[] = [];
+      try {
+        const dataFilesResponse = await apiService.listDataFiles({ projectId });
+        availableDataFiles = dataFilesResponse.data_files || [];
+        console.log('🔍 Available data files for analysis:', availableDataFiles.length);
+      } catch (error) {
+        console.log('🔍 Error loading data files for analysis');
+      }
+      
+      // Make contextual LLM call for analysis planning
+      const analysisPlan = await makeContextualLLMCall('analysis_plan', analysisPlanCell.id, {
+        availableDataFiles,
+        projectId
+      });
+      
+      // Stream the LLM response
+      if (analysisPlan && analysisPlan.plan) {
+        await streamLines(analysisPlanCell.id, [
+          '',
+          '## AI Analysis Plan:',
+          '',
+        ], 50);
+        
+        // Stream the LLM response in chunks
+        const planLines = analysisPlan.plan.split('\n');
+        for (const line of planLines) {
+          if (line.trim()) {
+            await streamLines(analysisPlanCell.id, [line], 30);
+          }
+        }
+      } else {
+        // Fallback content
+        await streamLines(analysisPlanCell.id, [
+          '',
+          '## Analysis Approach',
+          '',
+          'Based on the research goal and available data, we will:',
+          '1. **Data Exploration**: Examine the structure and quality of available data',
+          '2. **Data Preprocessing**: Clean and prepare data for analysis',
+          '3. **Statistical Analysis**: Perform relevant statistical tests and calculations',
+          '4. **Visualization**: Create charts and graphs to illustrate findings',
+          '5. **Interpretation**: Draw conclusions and insights from the analysis',
+        ], 100);
+      }
+      
+      // Stream completion
+      await streamLines(analysisPlanCell.id, [
+        '',
+        '## Step 2: ✅ Analysis Planning Complete!',
+        '',
+        '📊 **Analysis strategy** designed',
+        '🔍 **Data requirements** identified',
+        '🤖 **AI recommendations** generated',
+        '',
+        '**Next**: Proceeding to analysis execution...',
+      ], 100);
+      
+      // Update the cell to completed status
+      const finalCells = cells.map(cell => 
+        cell.id === analysisPlanCell.id 
+          ? { 
+              ...cell, 
+              status: 'completed' as const,
+              canProceed: true,
+              metadata: {
+                ...cell.metadata,
+                availableDataFiles,
+                goal,
+                analysisPlan: analysisPlan?.plan,
+                isStreaming: false,
+              },
+            }
+          : cell
+      );
+      setCells(finalCells);
+      await saveSession(finalCells);
+      
+      return finalCells.find(cell => cell.id === analysisPlanCell.id)!;
+    } catch (error) {
+      // Stream error
+      await streamLines(analysisPlanCell.id, [
+        '',
+        '## ❌ Error During Analysis Planning',
+        '',
+        `**Error**: ${error}`,
+        '',
+        'Please try again.',
+      ], 100);
+      
+      // Update the cell to error status
+      const errorCells = cells.map(cell => 
+        cell.id === analysisPlanCell.id 
+          ? { 
+              ...cell, 
+              status: 'error' as const,
+              metadata: {
+                ...cell.metadata,
+                isStreaming: false,
+              },
+            }
+          : cell
+      );
+      setCells(errorCells);
+      await saveSession(errorCells);
+      throw error;
+    }
+  };
+
+  const generateAnalysisExecutionCell = async (): Promise<Cell> => {
+    console.log('🔍 Generating analysis execution for goal:', goal);
+    
+    // Create progress log for analysis execution
+    const progressLogId = `progress-log-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+    const initialLogCell = createProgressLogCell(
+      `# Analysis Execution Progress\n\n**Goal**: ${goal}\n\n## Step 1: Starting Analysis Execution...\n\n🔍 Preparing analysis environment...`,
+      true
+    );
+    
+    // Add the progress log to cells immediately
+    const updatedCells = [...cells, initialLogCell];
+    setCells(updatedCells);
+    await saveSession(updatedCells);
+    
+    try {
+      // Get all available data files for analysis
+      let availableDataFiles: any[] = [];
+      
+      // Update progress - Step 2: Loading Data
+      const step2Cells = updateProgressLog(
+        updatedCells,
+        progressLogId,
+        `# Analysis Execution Progress\n\n**Goal**: ${goal}\n\n## Step 1: ✅ Starting Analysis Execution...\n\n## Step 2: 🔄 Loading Data Files...\n\n📁 Loading available data files for analysis...`,
+        true
+      );
+      setCells(step2Cells);
+      await saveSession(step2Cells);
+      
+      try {
+        const dataFilesResponse = await apiService.listDataFiles({ projectId });
+        availableDataFiles = dataFilesResponse.data_files || [];
+        console.log('🔍 Available data files for analysis execution:', availableDataFiles.length);
+      } catch (error) {
+        console.log('🔍 Error loading data files for analysis execution');
+      }
+      
+      // Update progress - Step 3: Generating Code
+      const step3Cells = updateProgressLog(
+        step2Cells,
+        progressLogId,
+        `# Analysis Execution Progress\n\n**Goal**: ${goal}\n\n## Step 1: ✅ Starting Analysis Execution...\n\n## Step 2: ✅ Loading Data Files...\n\n## Step 3: 🔄 Generating Analysis Code...\n\n📊 Found ${availableDataFiles.length} data file(s)\n💻 Creating Python analysis script...`,
+        true
+      );
+      setCells(step3Cells);
+      await saveSession(step3Cells);
+    
+    // Generate Python code for analysis
+    let analysisCode = `# Analysis Execution for: ${goal}\n\n`;
+    analysisCode += `import pandas as pd\nimport numpy as np\nimport matplotlib.pyplot as plt\nimport seaborn as sns\n\n`;
+    
+    if (availableDataFiles.length > 0) {
+      analysisCode += `# Load available data files\n`;
+      availableDataFiles.forEach((file, index) => {
+        const varName = `df_${index + 1}`;
+        analysisCode += `${varName} = pd.read_csv('${file.filename}')\n`;
+        analysisCode += `print(f"Loaded {file.filename}: {${varName}.shape}")\n`;
+        analysisCode += `print(f"Columns: {list(${varName}.columns)}")\n\n`;
+      });
+      
+      analysisCode += `# Data exploration\n`;
+      analysisCode += `print("=== DATA EXPLORATION ===\\n")\n`;
+      availableDataFiles.forEach((file, index) => {
+        const varName = `df_${index + 1}`;
+        analysisCode += `print(f"\\n{file.filename} Summary:")\n`;
+        analysisCode += `print(${varName}.info())\n`;
+        analysisCode += `print("\\nFirst few rows:")\n`;
+        analysisCode += `print(${varName}.head())\n`;
+        analysisCode += `print("\\nBasic statistics:")\n`;
+        analysisCode += `print(${varName}.describe())\n\n`;
+      });
+      
+      analysisCode += `# Analysis based on research goal: ${goal}\n`;
+      analysisCode += `print("=== ANALYSIS ===\\n")\n`;
+      analysisCode += `# TODO: Add specific analysis code based on the research goal\n`;
+      analysisCode += `# This will be customized based on the available data and research objectives\n\n`;
+      
+      analysisCode += `# Visualization\n`;
+      analysisCode += `print("=== VISUALIZATIONS ===\\n")\n`;
+      analysisCode += `# TODO: Add relevant visualizations\n`;
+      analysisCode += `plt.style.use('default')\n`;
+      analysisCode += `# Example: Create a simple visualization if we have numeric data\n`;
+      availableDataFiles.forEach((file, index) => {
+        const varName = `df_${index + 1}`;
+        analysisCode += `# Visualize ${file.filename}\n`;
+        analysisCode += `if ${varName}.select_dtypes(include=[np.number]).columns.any():\n`;
+        analysisCode += `    numeric_cols = ${varName}.select_dtypes(include=[np.number]).columns\n`;
+        analysisCode += `    if len(numeric_cols) > 0:\n`;
+        analysisCode += `        plt.figure(figsize=(10, 6))\n`;
+        analysisCode += `        ${varName}[numeric_cols].hist(bins=20, figsize=(12, 8))\n`;
+        analysisCode += `        plt.suptitle('Distribution of Numeric Variables in ${file.filename}')\n`;
+        analysisCode += `        plt.tight_layout()\n`;
+        analysisCode += `        plt.show()\n\n`;
+      });
+    } else {
+      analysisCode += `# No data files available for analysis\n`;
+      analysisCode += `print("No data files found. Please upload data before running analysis.")\n`;
     }
     
-    const firstStep = plan.steps[0];
+    // Update progress - Step 4: Complete
+    const step4Cells = updateProgressLog(
+      step3Cells,
+      progressLogId,
+      `# Analysis Execution Progress\n\n**Goal**: ${goal}\n\n## Step 1: ✅ Starting Analysis Execution...\n\n## Step 2: ✅ Loading Data Files...\n\n## Step 3: ✅ Generating Analysis Code...\n\n## Step 4: ✅ Analysis Code Generated!\n\n📊 **${availableDataFiles.length} data file(s)** loaded\n💻 **Python analysis script** created\n🔧 **Analysis ready** for execution\n\n**Next**: Click "Run" to execute the analysis...`,
+      false
+    );
+    setCells(step4Cells);
+    await saveSession(step4Cells);
     
     return {
-      id: `code-${firstStep.id}`,
-      type: 'code',
-      content: firstStep.code || `# ${firstStep.title}\n${firstStep.description}`,
+      id: `analysis-execution-${Date.now()}`,
+      type: 'analysis_execution',
+      content: analysisCode,
       timestamp: new Date().toISOString(),
       status: 'active',
       requiresUserAction: true,
       canProceed: true,
       metadata: {
-        stepId: firstStep.id,
-        stepOrder: 0,
-        totalSteps: plan.steps.length,
+        availableDataFiles,
+        goal,
+        analysisType: 'comprehensive',
       },
     };
-  };
+  } catch (error) {
+    // Update progress - Error
+    const errorCells = updateProgressLog(
+      updatedCells,
+      progressLogId,
+      `# Analysis Execution Progress\n\n**Goal**: ${goal}\n\n## ❌ Error During Analysis Generation\n\n**Error**: ${error}\n\nPlease try again.`,
+      false
+    );
+    setCells(errorCells);
+    await saveSession(errorCells);
+    throw error;
+  }
+};
 
   const executeCodeStep = async (codeCell: Cell) => {
     // Check if this cell already has an execution thread
@@ -1488,13 +2193,60 @@ const ResearchSession: React.FC<ResearchSessionProps> = ({
     return null;
   };
 
+  // Streaming functions
+  const startStreaming = (cellId: string) => {
+    setStreamingCells(prev => new Set(prev).add(cellId));
+  };
+
+  const stopStreaming = (cellId: string) => {
+    setStreamingCells(prev => {
+      const newSet = new Set(prev);
+      newSet.delete(cellId);
+      return newSet;
+    });
+  };
+
+  const streamLine = (cellId: string, line: string) => {
+    setCells(prevCells => 
+      prevCells.map(cell => 
+        cell.id === cellId 
+          ? {
+              ...cell,
+              content: cell.content + '\n' + line,
+              metadata: {
+                ...cell.metadata,
+                streamLines: [...(cell.metadata?.streamLines || []), line],
+                isStreaming: true,
+              },
+              timestamp: new Date().toISOString(), // Force re-render
+            }
+          : cell
+      )
+    );
+  };
+
+  const streamLines = async (cellId: string, lines: string[], delayMs: number = 100) => {
+    startStreaming(cellId);
+    
+    for (const line of lines) {
+      streamLine(cellId, line);
+      await new Promise(resolve => setTimeout(resolve, delayMs));
+    }
+    
+    stopStreaming(cellId);
+  };
+
   const renderCell = (cell: Cell) => {
     // Get execution thread for this cell
     const executionThread = getCellExecutionStatus(cell.id);
     
+    // Create a key that includes content hash to force re-render when content changes
+    const contentHash = cell.content.length.toString() + '_' + cell.timestamp;
+    const cellKey = `${cell.id}_${contentHash}`;
+    
     return (
       <CellComponent
-        key={cell.id}
+        key={cellKey}
         cell={cell}
         executionThread={executionThread || undefined}
         onExecute={cell.type === 'code' ? () => executeCodeStep(cell) : undefined}
@@ -1502,6 +2254,194 @@ const ResearchSession: React.FC<ResearchSessionProps> = ({
         onSubmitComment={handleSubmitComment}
       />
     );
+  };
+
+  // Context building for LLM calls
+  const buildResearchContext = (currentStep: string, excludeCurrentCell?: string): string => {
+    const relevantCells = cells.filter(cell => 
+      cell.id !== excludeCurrentCell && 
+      cell.status === 'completed' && 
+      cell.content.trim().length > 0
+    );
+
+    if (relevantCells.length === 0) {
+      return `Research Goal: ${goal}\n\nCurrent Step: ${currentStep}\n\nNo previous context available.`;
+    }
+
+    let context = `# Research Context\n\n## Research Goal\n${goal}\n\n## Current Step\n${currentStep}\n\n## Previous Research Entries\n\n`;
+
+    relevantCells.forEach((cell, index) => {
+      const cellType = getCellTypeLabel(cell.type);
+      const timestamp = new Date(cell.timestamp).toLocaleString();
+      
+      context += `### ${index + 1}. ${cellType} (${timestamp})\n`;
+      context += `${cell.content}\n\n`;
+      
+      // Add metadata if available
+      if (cell.metadata) {
+        if (cell.metadata.references && cell.metadata.references.length > 0) {
+          context += `**References Found:** ${cell.metadata.references.length} sources\n`;
+        }
+        if (cell.metadata.existingDataFiles && cell.metadata.existingDataFiles.length > 0) {
+          context += `**Data Files:** ${cell.metadata.existingDataFiles.length} files\n`;
+        }
+        if (cell.metadata.background_summary) {
+          context += `**Background Summary:** ${cell.metadata.background_summary}\n`;
+        }
+        context += '\n';
+      }
+    });
+
+    return context;
+  };
+
+  const getCellTypeLabel = (type: string): string => {
+    switch (type) {
+      case 'goal': return 'Research Goal';
+      case 'initialization': return 'Research Initialization';
+      case 'data_assessment': return 'Data Assessment';
+      case 'data_collection': return 'Data Collection';
+      case 'analysis_plan': return 'Analysis Plan';
+      case 'analysis_execution': return 'Analysis Execution';
+      case 'abstract': return 'Research Abstract';
+      case 'plan': return 'Research Plan';
+      case 'code': return 'Code Execution';
+      case 'result': return 'Execution Results';
+      case 'writeup': return 'Research Write-up';
+      default: return 'Research Entry';
+    }
+  };
+
+  // LLM prompt templates for each step
+  const getLLMPrompt = (stepType: string, context: string, additionalParams?: any): string => {
+    const basePrompt = `You are an AI research assistant helping with a research project. Use the following context to inform your response:
+
+${context}
+
+Please provide a detailed, thoughtful response based on the research context above.`;
+
+    switch (stepType) {
+      case 'initialization':
+        return `${basePrompt}
+
+TASK: Research Initialization
+Based on the research goal, please:
+1. Identify relevant research sources and academic references
+2. Generate a comprehensive background summary
+3. Suggest key research questions to explore
+4. Outline the main research areas to investigate
+
+Format your response as a structured research initialization with clear sections.`;
+
+      case 'data_assessment':
+        return `${basePrompt}
+
+TASK: Data Assessment
+Based on the research context and any existing data files, please:
+1. Evaluate what data is needed for this research
+2. Assess the relevance of any existing data files
+3. Identify gaps in available data
+4. Recommend what additional data should be collected
+5. Suggest data sources or collection methods
+
+If no data files exist, focus on what data would be most valuable for this research.`;
+
+      case 'data_collection':
+        return `${basePrompt}
+
+TASK: Data Collection Planning
+Based on the research context and data assessment, please:
+1. Specify exactly what data needs to be collected
+2. Describe the format and structure of this data
+3. Explain how this data will support the research goal
+4. Provide sample data or data generation methods if applicable
+5. Outline any limitations or assumptions
+
+Be specific about data requirements and how they relate to the research objectives.`;
+
+      case 'analysis_plan':
+        return `${basePrompt}
+
+TASK: Analysis Planning
+Based on the research context and available data, please:
+1. Design a comprehensive analysis approach
+2. Specify statistical methods or analytical techniques to use
+3. Outline the key questions the analysis should answer
+4. Describe expected outputs and visualizations
+5. Identify potential insights to look for
+
+Focus on analytical methods that will provide meaningful insights for the research goal.`;
+
+      case 'analysis_execution':
+        return `${basePrompt}
+
+TASK: Analysis Execution
+Based on the research context and analysis plan, please:
+1. Generate Python code to perform the planned analysis
+2. Include data loading, preprocessing, and analysis steps
+3. Add appropriate visualizations and statistical tests
+4. Include code comments explaining each step
+5. Ensure the code addresses the research questions
+
+Provide complete, runnable Python code with proper error handling and documentation.`;
+
+      default:
+        return basePrompt;
+    }
+  };
+
+  // Enhanced LLM call function
+  const makeContextualLLMCall = async (stepType: string, cellId?: string, additionalParams?: any): Promise<any> => {
+    const context = buildResearchContext(stepType, cellId);
+    const prompt = getLLMPrompt(stepType, context, additionalParams);
+    
+    console.log(`🤖 Making contextual LLM call for step: ${stepType}`);
+    console.log(`📝 Context length: ${context.length} characters`);
+    
+    // Use the appropriate API service based on step type
+    switch (stepType) {
+      case 'initialization':
+        return await apiService.initializeResearch({ 
+          goal,
+          context: context,
+          prompt: prompt
+        });
+      
+      case 'data_assessment':
+        return await apiService.analyzeDataFile({ 
+          projectId,
+          context: context,
+          prompt: prompt
+        });
+      
+      case 'data_collection':
+        return await apiService.generateDataFile({ 
+          projectId,
+          context: context,
+          prompt: prompt
+        });
+      
+      case 'analysis_plan':
+        return await apiService.generateResearchPlan({ 
+          goal,
+          context: context,
+          prompt: prompt
+        });
+      
+      case 'analysis_execution':
+        return await apiService.executeCode({ 
+          code: prompt, // This will be the generated code
+          sessionId,
+          context: context
+        });
+      
+      default:
+        // Generic LLM call for other steps
+        return await apiService.callLLM({ 
+          prompt: prompt,
+          context: context
+        });
+    }
   };
 
   return (

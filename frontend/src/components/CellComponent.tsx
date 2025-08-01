@@ -27,7 +27,7 @@ const AnimatedEllipsis: React.FC<{ isActive: boolean }> = ({ isActive }) => {
 
 interface Cell {
   id: string;
-  type: 'goal' | 'initialization' | 'questions' | 'plan' | 'code' | 'result' | 'visualization' | 'writeup' | 'data' | 'reference' | 'variable' | 'library' | 'title' | 'references' | 'abstract' | 'evaluation' | 'results' | 'data_upload' | 'data_analysis' | 'data_metadata' | 'duckdb_query' | 'phase' | 'title_created';
+  type: 'goal' | 'initialization' | 'questions' | 'plan' | 'code' | 'result' | 'visualization' | 'writeup' | 'data' | 'reference' | 'variable' | 'library' | 'title' | 'references' | 'abstract' | 'evaluation' | 'results' | 'data_upload' | 'data_analysis' | 'data_metadata' | 'duckdb_query' | 'phase' | 'title_created' | 'data_assessment' | 'data_collection' | 'analysis_plan' | 'analysis_execution' | 'progress_log';
   content: string;
   timestamp: string;
   output?: string;
@@ -51,6 +51,9 @@ interface Cell {
     stepId?: string;
     stepOrder?: number;
     totalSteps?: number;
+    // Streaming support
+    streamLines?: string[];
+    isStreaming?: boolean;
   };
   requiresUserAction?: boolean;
   canProceed?: boolean;
@@ -159,6 +162,16 @@ const CellComponent: React.FC<CellComponentProps> = ({ cell, onExecute, onNextSt
         return <Code className="h-4 w-4 text-emerald-500" />;
       case 'library':
         return <Package className="h-4 w-4 text-violet-500" />;
+      case 'data_assessment':
+        return <BarChart3 className="h-4 w-4 text-cyan-500" />;
+      case 'data_collection':
+        return <FileText className="h-4 w-4 text-blue-500" />;
+      case 'analysis_plan':
+        return <FileEdit className="h-4 w-4 text-purple-500" />;
+      case 'analysis_execution':
+        return <Code className="h-4 w-4 text-indigo-500" />;
+      case 'progress_log':
+        return <div className="h-4 w-4 text-blue-500 animate-pulse">📊</div>;
       default:
         return <FileText className="h-4 w-4 text-gray-500" />;
     }
@@ -211,6 +224,16 @@ const CellComponent: React.FC<CellComponentProps> = ({ cell, onExecute, onNextSt
         return 'Variable';
       case 'library':
         return 'Library';
+      case 'data_assessment':
+        return 'Data Assessment';
+      case 'data_collection':
+        return 'Data Collection';
+      case 'analysis_plan':
+        return 'Analysis Plan';
+      case 'analysis_execution':
+        return 'Analysis Execution';
+      case 'progress_log':
+        return 'Progress Log';
       default:
         return 'Cell';
     }
@@ -301,7 +324,12 @@ const CellComponent: React.FC<CellComponentProps> = ({ cell, onExecute, onNextSt
             <div className="bg-green-50 border border-green-200 rounded-lg p-4">
               <h4 className="text-lg font-medium text-green-900 mb-2">Research Initialization</h4>
               <div className="prose prose-sm max-w-none">
-                <div className="whitespace-pre-wrap text-green-800">{cell.content}</div>
+                <div className="whitespace-pre-wrap text-green-800 font-mono text-sm bg-black bg-opacity-5 p-3 rounded border">
+                  {cell.content}
+                  {cell.metadata?.isStreaming && (
+                    <span className="inline-block w-2 h-4 bg-green-500 ml-1 animate-pulse"></span>
+                  )}
+                </div>
               </div>
             </div>
             
@@ -746,6 +774,74 @@ const CellComponent: React.FC<CellComponentProps> = ({ cell, onExecute, onNextSt
                     </div>
                   </div>
                 )}
+              </div>
+            </div>
+          </div>
+        );
+
+      case 'data_assessment':
+        return (
+          <div className="space-y-4">
+            <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
+              <h4 className="text-lg font-medium text-blue-900 mb-2">Data Assessment</h4>
+              <div className="prose prose-sm max-w-none">
+                <div className="whitespace-pre-wrap text-blue-800 font-mono text-sm bg-black bg-opacity-5 p-3 rounded border">
+                  {cell.content}
+                  {cell.metadata?.isStreaming && (
+                    <span className="inline-block w-2 h-4 bg-blue-500 ml-1 animate-pulse"></span>
+                  )}
+                </div>
+              </div>
+            </div>
+          </div>
+        );
+
+      case 'data_collection':
+        return (
+          <div className="space-y-4">
+            <div className="bg-cyan-50 border border-cyan-200 rounded-lg p-4">
+              <h4 className="text-lg font-medium text-cyan-900 mb-2">Data Collection</h4>
+              <div className="prose prose-sm max-w-none">
+                <div className="whitespace-pre-wrap text-cyan-800 font-mono text-sm bg-black bg-opacity-5 p-3 rounded border">
+                  {cell.content}
+                  {cell.metadata?.isStreaming && (
+                    <span className="inline-block w-2 h-4 bg-cyan-500 ml-1 animate-pulse"></span>
+                  )}
+                </div>
+              </div>
+            </div>
+          </div>
+        );
+
+      case 'analysis_plan':
+        return (
+          <div className="space-y-4">
+            <div className="bg-purple-50 border border-purple-200 rounded-lg p-4">
+              <h4 className="text-lg font-medium text-purple-900 mb-2">Analysis Plan</h4>
+              <div className="prose prose-sm max-w-none">
+                <div className="whitespace-pre-wrap text-purple-800 font-mono text-sm bg-black bg-opacity-5 p-3 rounded border">
+                  {cell.content}
+                  {cell.metadata?.isStreaming && (
+                    <span className="inline-block w-2 h-4 bg-purple-500 ml-1 animate-pulse"></span>
+                  )}
+                </div>
+              </div>
+            </div>
+          </div>
+        );
+
+      case 'analysis_execution':
+        return (
+          <div className="space-y-4">
+            <div className="bg-indigo-50 border border-indigo-200 rounded-lg p-4">
+              <h4 className="text-lg font-medium text-indigo-900 mb-2">Analysis Execution</h4>
+              <div className="prose prose-sm max-w-none">
+                <div className="whitespace-pre-wrap text-indigo-800 font-mono text-sm bg-black bg-opacity-5 p-3 rounded border">
+                  {cell.content}
+                  {cell.metadata?.isStreaming && (
+                    <span className="inline-block w-2 h-4 bg-indigo-500 ml-1 animate-pulse"></span>
+                  )}
+                </div>
               </div>
             </div>
           </div>
