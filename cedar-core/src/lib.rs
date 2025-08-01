@@ -13,5 +13,9 @@ pub mod publication;
 // Re-export key types for easier access
 pub use storage::{
     DataFileInfo, ColumnInfo, DataAnalysisRequest, DataAnalysisResponse, 
-    ColumnAnalysis, DuckDBTableInfo, DatasetManifest
+    ColumnAnalysis, DuckDBTableInfo, DatasetManifest, Visualization,
+    list_data_files, save_uploaded_file, generate_data_analysis_script,
+    create_duckdb_table, get_table_info_query, get_sample_data_query,
+    list_project_visualizations, save_visualization, delete_visualization,
+    generate_vega_lite_spec, generate_plotly_spec, validate_vega_lite_spec, validate_plotly_spec
 };

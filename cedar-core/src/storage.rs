@@ -75,6 +75,23 @@ pub struct DuckDBTableInfo {
     pub created_at: u64,
 }
 
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct Visualization {
+    pub id: String,
+    pub name: String,
+    pub visualization_type: String, // "vega-lite", "plotly", "matplotlib", "manual"
+    pub description: String,
+    pub filename: String,
+    pub content: String,
+    pub code: Option<String>,
+    pub timestamp: u64,
+    pub spec: Option<serde_json::Value>, // Vega-Lite specification
+    pub data: Option<serde_json::Value>, // Plotly data
+    pub layout: Option<serde_json::Value>, // Plotly layout
+    pub project_id: String,
+    pub session_id: Option<String>,
+}
+
 impl DatasetManifest {
     pub fn new(
         name: &str,
@@ -171,6 +188,334 @@ impl DataFileInfo {
         
         Ok(Some(file_info))
     }
+}
+
+impl Visualization {
+    pub fn new(
+        name: String,
+        visualization_type: String,
+        description: String,
+        content: String,
+        project_id: String,
+        session_id: Option<String>,
+    ) -> Self {
+        let id = uuid::Uuid::new_v4().to_string();
+        let timestamp = chrono::Utc::now().timestamp() as u64;
+        let filename = format!("{}.json", name.replace(" ", "_").to_lowercase());
+
+        // Parse content based on visualization type
+        let (spec, data, layout) = match visualization_type.as_str() {
+            "vega-lite" => {
+                if let Ok(parsed_spec) = serde_json::from_str::<serde_json::Value>(&content) {
+                    (Some(parsed_spec), None, None)
+                } else {
+                    (None, None, None)
+                }
+            }
+            "plotly" => {
+                if let Ok(plotly_data) = serde_json::from_str::<serde_json::Value>(&content) {
+                    let data = plotly_data.get("data").cloned();
+                    let layout = plotly_data.get("layout").cloned();
+                    (None, data, layout)
+                } else {
+                    (None, None, None)
+                }
+            }
+            _ => (None, None, None),
+        };
+
+        Self {
+            id,
+            name,
+            visualization_type,
+            description,
+            filename,
+            content,
+            code: None,
+            timestamp,
+            spec,
+            data,
+            layout,
+            project_id,
+            session_id,
+        }
+    }
+
+    pub fn file_path(&self) -> std::path::PathBuf {
+        let mut path = data_root();
+        path.push("visualizations");
+        path.push(&self.project_id);
+        path.push(&self.filename);
+        path
+    }
+
+    pub fn save(&self) -> Result<(), String> {
+        let file_path = self.file_path();
+        
+        // Create directory if it doesn't exist
+        if let Some(parent) = file_path.parent() {
+            std::fs::create_dir_all(parent)
+                .map_err(|e| format!("Failed to create visualization directory: {}", e))?;
+        }
+
+        // Save visualization metadata
+        let metadata_path = file_path.with_extension("metadata.json");
+        let metadata_json = serde_json::to_string_pretty(self)
+            .map_err(|e| format!("Failed to serialize visualization metadata: {}", e))?;
+        
+        std::fs::write(&metadata_path, metadata_json)
+            .map_err(|e| format!("Failed to save visualization metadata: {}", e))?;
+
+        // Save visualization content
+        std::fs::write(&file_path, &self.content)
+            .map_err(|e| format!("Failed to save visualization content: {}", e))?;
+
+        Ok(())
+    }
+
+    pub fn load(file_path: &std::path::Path) -> Result<Self, String> {
+        let metadata_path = file_path.with_extension("metadata.json");
+        
+        let metadata_json = std::fs::read_to_string(&metadata_path)
+            .map_err(|e| format!("Failed to read visualization metadata: {}", e))?;
+        
+        let mut visualization: Self = serde_json::from_str(&metadata_json)
+            .map_err(|e| format!("Failed to parse visualization metadata: {}", e))?;
+
+        // Load content
+        visualization.content = std::fs::read_to_string(file_path)
+            .map_err(|e| format!("Failed to read visualization content: {}", e))?;
+
+        Ok(visualization)
+    }
+}
+
+/// List all visualizations for a project
+pub fn list_project_visualizations(project_id: &str) -> Result<Vec<Visualization>, String> {
+    let mut path = data_root();
+    path.push("visualizations");
+    path.push(project_id);
+
+    if !path.exists() {
+        return Ok(Vec::new());
+    }
+
+    let mut visualizations = Vec::new();
+    
+    for entry in std::fs::read_dir(&path)
+        .map_err(|e| format!("Failed to read visualizations directory: {}", e))? {
+        let entry = entry.map_err(|e| format!("Failed to read directory entry: {}", e))?;
+        let file_path = entry.path();
+        
+        if file_path.extension().and_then(|s| s.to_str()) == Some("json") {
+            if let Ok(visualization) = Visualization::load(&file_path) {
+                visualizations.push(visualization);
+            }
+        }
+    }
+
+    // Sort by timestamp (newest first)
+    visualizations.sort_by(|a, b| b.timestamp.cmp(&a.timestamp));
+    
+    Ok(visualizations)
+}
+
+/// Save a new visualization
+pub fn save_visualization(visualization: &Visualization) -> Result<(), String> {
+    visualization.save()
+}
+
+/// Delete a visualization
+pub fn delete_visualization(project_id: &str, visualization_id: &str) -> Result<(), String> {
+    let visualizations = list_project_visualizations(project_id)?;
+    
+    if let Some(visualization) = visualizations.iter().find(|v| v.id == visualization_id) {
+        let file_path = visualization.file_path();
+        let metadata_path = file_path.with_extension("metadata.json");
+        
+        // Delete content file
+        if file_path.exists() {
+            std::fs::remove_file(&file_path)
+                .map_err(|e| format!("Failed to delete visualization file: {}", e))?;
+        }
+        
+        // Delete metadata file
+        if metadata_path.exists() {
+            std::fs::remove_file(&metadata_path)
+                .map_err(|e| format!("Failed to delete visualization metadata: {}", e))?;
+        }
+        
+        Ok(())
+    } else {
+        Err("Visualization not found".to_string())
+    }
+}
+
+/// Generate a Vega-Lite specification from data
+pub fn generate_vega_lite_spec(
+    data: &[serde_json::Value],
+    chart_type: &str,
+    x_field: &str,
+    y_field: &str,
+    title: &str,
+) -> Result<serde_json::Value, String> {
+    let mark = match chart_type {
+        "bar" => "bar",
+        "line" => "line",
+        "scatter" => "point",
+        "area" => "area",
+        "histogram" => "bar",
+        "box" => "boxplot",
+        _ => "bar",
+    };
+
+    let mut spec = serde_json::json!({
+        "$schema": "https://vega.github.io/schema/vega-lite/v5.json",
+        "description": title,
+        "data": {
+            "values": data
+        },
+        "mark": mark,
+        "encoding": {
+            "x": {"field": x_field, "type": "nominal"},
+            "y": {"field": y_field, "type": "quantitative"}
+        },
+        "title": title,
+        "width": 400,
+        "height": 300
+    });
+
+    // Add histogram-specific encoding for histogram charts
+    if chart_type == "histogram" {
+        spec["encoding"]["x"]["type"] = serde_json::Value::String("quantitative".to_string());
+        spec["encoding"]["x"]["bin"] = serde_json::Value::Bool(true);
+        spec["encoding"]["y"]["aggregate"] = serde_json::Value::String("count".to_string());
+        spec["encoding"]["y"]["field"] = serde_json::Value::String("*".to_string());
+    }
+
+    Ok(spec)
+}
+
+/// Generate a Plotly specification from data
+pub fn generate_plotly_spec(
+    data: &[serde_json::Value],
+    chart_type: &str,
+    x_field: &str,
+    y_field: &str,
+    title: &str,
+) -> Result<serde_json::Value, String> {
+    // Extract x and y values from data
+    let x_values: Vec<serde_json::Value> = data
+        .iter()
+        .filter_map(|row| row.get(x_field).cloned())
+        .collect();
+    
+    let y_values: Vec<serde_json::Value> = data
+        .iter()
+        .filter_map(|row| row.get(y_field).cloned())
+        .collect();
+
+    let plot_type = match chart_type {
+        "bar" => "bar",
+        "line" => "scatter",
+        "scatter" => "scatter",
+        "area" => "scatter",
+        "histogram" => "histogram",
+        "box" => "box",
+        _ => "bar",
+    };
+
+    let mut trace = serde_json::json!({
+        "x": x_values,
+        "y": y_values,
+        "type": plot_type
+    });
+
+    // Add line mode for line charts
+    if chart_type == "line" {
+        trace["mode"] = serde_json::Value::String("lines+markers".to_string());
+    }
+
+    // Add fill for area charts
+    if chart_type == "area" {
+        trace["fill"] = serde_json::Value::String("tonexty".to_string());
+    }
+
+    let spec = serde_json::json!({
+        "data": [trace],
+        "layout": {
+            "title": title,
+            "xaxis": {"title": x_field},
+            "yaxis": {"title": y_field},
+            "width": 600,
+            "height": 400
+        }
+    });
+
+    Ok(spec)
+}
+
+/// Validate Vega-Lite specification
+pub fn validate_vega_lite_spec(spec: &serde_json::Value) -> Result<(), String> {
+    // Basic validation - check for required fields
+    if !spec.is_object() {
+        return Err("Specification must be a JSON object".to_string());
+    }
+
+    let obj = spec.as_object().unwrap();
+    
+    if !obj.contains_key("mark") {
+        return Err("Missing required field: mark".to_string());
+    }
+    
+    if !obj.contains_key("encoding") {
+        return Err("Missing required field: encoding".to_string());
+    }
+
+    // Check encoding structure
+    if let Some(encoding) = obj.get("encoding") {
+        if !encoding.is_object() {
+            return Err("Encoding must be a JSON object".to_string());
+        }
+        
+        let encoding_obj = encoding.as_object().unwrap();
+        if !encoding_obj.contains_key("x") && !encoding_obj.contains_key("y") {
+            return Err("Encoding must contain at least x or y field".to_string());
+        }
+    }
+
+    Ok(())
+}
+
+/// Validate Plotly specification
+pub fn validate_plotly_spec(spec: &serde_json::Value) -> Result<(), String> {
+    if !spec.is_object() {
+        return Err("Specification must be a JSON object".to_string());
+    }
+
+    let obj = spec.as_object().unwrap();
+    
+    if !obj.contains_key("data") {
+        return Err("Missing required field: data".to_string());
+    }
+    
+    if !obj.contains_key("layout") {
+        return Err("Missing required field: layout".to_string());
+    }
+
+    // Check data structure
+    if let Some(data) = obj.get("data") {
+        if !data.is_array() {
+            return Err("Data must be an array".to_string());
+        }
+        
+        let data_array = data.as_array().unwrap();
+        if data_array.is_empty() {
+            return Err("Data array cannot be empty".to_string());
+        }
+    }
+
+    Ok(())
 }
 
 pub fn create_manifest(

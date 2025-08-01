@@ -13,6 +13,10 @@ This directory contains comprehensive documentation for Cedar, the AI-powered re
 - **[Data Management System](DATA_MANAGEMENT_SYSTEM.md)** - Complete guide to data upload, analysis, and querying
 - **[DuckDB Integration](DATA_MANAGEMENT_SYSTEM.md#duckdb-integration)** - SQL interface and database management
 
+### 🎨 **Visualization System**
+- **[Visualization System](VISUALIZATION_SYSTEM.md)** - Vega-Lite and Plotly integration for standardized charts
+- **[Interactive Charts](VISUALIZATION_SYSTEM.md#visualization-standards)** - Declarative and interactive visualization creation
+
 ### 🧠 **Research Engine**
 - **[Research Plan System](RESEARCH_PLAN_SYSTEM.md)** - How AI generates and adapts research plans
 - **[Intelligent Step Generation](INTELLIGENT_STEP_GENERATION.md)** - Adaptive research step creation

@@ -1007,6 +1007,109 @@ class ApiService {
     }
   }
 
+  // Visualization Management Methods
+  async createVisualization(request: {
+    projectId: string;
+    name: string;
+    visualizationType: string;
+    description: string;
+    content: string;
+    code?: string;
+    sessionId?: string;
+  }) {
+    console.log('🎨 Calling Tauri backend: create_visualization', request);
+
+    try {
+      const backendRequest = {
+        project_id: request.projectId,
+        name: request.name,
+        visualization_type: request.visualizationType,
+        description: request.description,
+        content: request.content,
+        code: request.code || null,
+        session_id: request.sessionId || null
+      };
+
+      const result = await invoke('create_visualization', { request: backendRequest });
+      console.log('✅ Backend visualization created successfully');
+      return result;
+    } catch (error) {
+      console.error('❌ Backend error creating visualization:', error);
+      throw error;
+    }
+  }
+
+  async listVisualizations(request: {
+    projectId: string;
+  }) {
+    console.log('📊 Calling Tauri backend: list_visualizations', request);
+
+    try {
+      const backendRequest = {
+        project_id: request.projectId
+      };
+
+      const result = await invoke('list_visualizations', { request: backendRequest });
+      console.log('✅ Backend visualizations listed successfully');
+      return result;
+    } catch (error) {
+      console.error('❌ Backend error listing visualizations:', error);
+      throw error;
+    }
+  }
+
+  async deleteVisualization(request: {
+    projectId: string;
+    visualizationId: string;
+  }) {
+    console.log('🗑️ Calling Tauri backend: delete_visualization', request);
+
+    try {
+      const backendRequest = {
+        project_id: request.projectId,
+        visualization_id: request.visualizationId
+      };
+
+      const result = await invoke('delete_visualization', { request: backendRequest });
+      console.log('✅ Backend visualization deleted successfully');
+      return result;
+    } catch (error) {
+      console.error('❌ Backend error deleting visualization:', error);
+      throw error;
+    }
+  }
+
+  async generateVisualization(request: {
+    projectId: string;
+    data: any[];
+    chartType: string;
+    xField: string;
+    yField: string;
+    title: string;
+    visualizationType: string;
+  }) {
+    console.log('🎨 Calling Tauri backend: generate_visualization', request);
+
+    try {
+      const backendRequest = {
+        project_id: request.projectId,
+        data: request.data,
+        chart_type: request.chartType,
+        x_field: request.xField,
+        y_field: request.yField,
+        title: request.title,
+        visualization_type: request.visualizationType
+      };
+
+      const result = await invoke('generate_visualization', { request: backendRequest });
+      console.log('✅ Backend visualization generated successfully');
+      return result;
+    } catch (error) {
+      console.error('❌ Backend error generating visualization:', error);
+      throw error;
+    }
+  }
+
   // async extractLibrariesFromCode(projectId: string, code: string, cellId: string) {
   //   console.log("🔧 Calling Tauri backend: extract_libraries_from_code", { projectId, codeLength: code.length, cellId });
   //   try {

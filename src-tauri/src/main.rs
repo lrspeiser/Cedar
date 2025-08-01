@@ -13,7 +13,7 @@ use std::env;
 use std::io::{self, Write};
 use cedar::{cell, agent, context, executor, llm, storage};
 use cedar::executor::{ExecutionResult, StepEvaluation};
-use cedar::storage::{DataFileInfo, ColumnInfo, DataAnalysisRequest, DataAnalysisResponse, ColumnAnalysis};
+use cedar::storage::{DataFileInfo, ColumnInfo, DataAnalysisRequest, DataAnalysisResponse, ColumnAnalysis, Visualization};
 use std::fs;
 use std::path::PathBuf;
 
@@ -288,6 +288,40 @@ struct DuckDBQueryRequest {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct ListDataFilesRequest {
     project_id: String,
+}
+
+/// Visualization Management Request Structs
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct CreateVisualizationRequest {
+    project_id: String,
+    name: String,
+    visualization_type: String, // "vega-lite", "plotly", "matplotlib", "manual"
+    description: String,
+    content: String,
+    code: Option<String>,
+    session_id: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct ListVisualizationsRequest {
+    project_id: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct DeleteVisualizationRequest {
+    project_id: String,
+    visualization_id: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct GenerateVisualizationRequest {
+    project_id: String,
+    data: Vec<serde_json::Value>,
+    chart_type: String, // "bar", "line", "scatter", "histogram", "box", "area"
+    x_field: String,
+    y_field: String,
+    title: String,
+    visualization_type: String, // "vega-lite" or "plotly"
 }
 
 // File storage functions
@@ -604,6 +638,173 @@ fn create_duckdb_connection(project_id: &str) -> Result<(), String> {
 async fn execute_duckdb_query(project_id: &str, query: &str) -> Result<Vec<Vec<String>>, String> {
     // Temporarily disabled until DuckDB is properly configured
     Err("DuckDB not available".to_string())
+}
+
+/// Create a new visualization
+#[tauri::command]
+async fn create_visualization(
+    request: CreateVisualizationRequest,
+    state: State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    println!("📊 Creating visualization: {}", request.name);
+    
+    let visualization = Visualization::new(
+        request.name,
+        request.visualization_type,
+        request.description,
+        request.content,
+        request.project_id.clone(),
+        request.session_id,
+    );
+    
+    // Save visualization to storage
+    storage::save_visualization(&visualization)
+        .map_err(|e| format!("Failed to save visualization: {}", e))?;
+    
+    // Update project state
+    {
+        let mut projects = state.projects.lock().unwrap();
+        if let Some(project) = projects.get_mut(&request.project_id) {
+            project.images.push(visualization.id.clone());
+            save_project(project)?;
+        }
+    }
+    
+    println!("✅ Visualization created successfully: {}", visualization.id);
+    
+    Ok(serde_json::json!({
+        "success": true,
+        "visualization_id": visualization.id,
+        "message": "Visualization created successfully"
+    }))
+}
+
+/// List all visualizations for a project
+#[tauri::command]
+async fn list_visualizations(
+    request: ListVisualizationsRequest,
+    _state: State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    println!("📊 Listing visualizations for project: {}", request.project_id);
+    
+    let visualizations = storage::list_project_visualizations(&request.project_id)
+        .map_err(|e| format!("Failed to list visualizations: {}", e))?;
+    
+    let visualization_data: Vec<serde_json::Value> = visualizations
+        .iter()
+        .map(|v| serde_json::json!({
+            "id": v.id,
+            "name": v.name,
+            "type": v.visualization_type,
+            "description": v.description,
+            "filename": v.filename,
+            "content": v.content,
+            "code": v.code,
+            "timestamp": v.timestamp,
+            "spec": v.spec,
+            "data": v.data,
+            "layout": v.layout
+        }))
+        .collect();
+    
+    println!("✅ Found {} visualizations", visualization_data.len());
+    
+    Ok(serde_json::json!({
+        "success": true,
+        "visualizations": visualization_data
+    }))
+}
+
+/// Delete a visualization
+#[tauri::command]
+async fn delete_visualization(
+    request: DeleteVisualizationRequest,
+    state: State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    println!("🗑️ Deleting visualization: {}", request.visualization_id);
+    
+    // Delete from storage
+    storage::delete_visualization(&request.project_id, &request.visualization_id)
+        .map_err(|e| format!("Failed to delete visualization: {}", e))?;
+    
+    // Update project state
+    {
+        let mut projects = state.projects.lock().unwrap();
+        if let Some(project) = projects.get_mut(&request.project_id) {
+            project.images.retain(|id| id != &request.visualization_id);
+            save_project(project)?;
+        }
+    }
+    
+    println!("✅ Visualization deleted successfully");
+    
+    Ok(serde_json::json!({
+        "success": true,
+        "message": "Visualization deleted successfully"
+    }))
+}
+
+/// Generate a visualization from data
+#[tauri::command]
+async fn generate_visualization(
+    request: GenerateVisualizationRequest,
+    state: State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    println!("🎨 Generating {} visualization: {}", request.visualization_type, request.title);
+    
+    let spec = match request.visualization_type.as_str() {
+        "vega-lite" => {
+            storage::generate_vega_lite_spec(
+                &request.data,
+                &request.chart_type,
+                &request.x_field,
+                &request.y_field,
+                &request.title,
+            )?
+        }
+        "plotly" => {
+            storage::generate_plotly_spec(
+                &request.data,
+                &request.chart_type,
+                &request.x_field,
+                &request.y_field,
+                &request.title,
+            )?
+        }
+        _ => return Err("Unsupported visualization type".to_string()),
+    };
+    
+    // Create visualization
+    let visualization = Visualization::new(
+        request.title.clone(),
+        request.visualization_type,
+        format!("Generated {} chart", request.chart_type),
+        serde_json::to_string_pretty(&spec).unwrap(),
+        request.project_id.clone(),
+        None,
+    );
+    
+    // Save visualization
+    storage::save_visualization(&visualization)
+        .map_err(|e| format!("Failed to save visualization: {}", e))?;
+    
+    // Update project state
+    {
+        let mut projects = state.projects.lock().unwrap();
+        if let Some(project) = projects.get_mut(&request.project_id) {
+            project.images.push(visualization.id.clone());
+            save_project(project)?;
+        }
+    }
+    
+    println!("✅ Visualization generated successfully: {}", visualization.id);
+    
+    Ok(serde_json::json!({
+        "success": true,
+        "visualization_id": visualization.id,
+        "spec": spec,
+        "message": "Visualization generated successfully"
+    }))
 }
 
 /// Automatically categorize AI-generated content into project tabs
@@ -4614,6 +4815,11 @@ fn main() {
             generate_research_plan,
             execute_step,
             generate_next_steps,
+            // Visualization Management endpoints
+            create_visualization,
+            list_visualizations,
+            delete_visualization,
+            generate_visualization,
             // Data Management endpoints
             // upload_data_file,
             // analyze_data_file,
