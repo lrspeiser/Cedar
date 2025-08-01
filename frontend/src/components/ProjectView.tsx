@@ -47,7 +47,7 @@ const ProjectView: React.FC<ProjectViewProps> = ({ project, onBack }) => {
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [deleteConfirmation, setDeleteConfirmation] = useState('');
   const [isDeleting, setIsDeleting] = useState(false);
-  const [researchAnswers, setResearchAnswers] = useState<Record<string, string> | undefined>(project.researchAnswers);
+  const [researchAnswers] = useState<Record<string, string> | undefined>(project.researchAnswers);
 
   const tabs = [
     { id: 'notebook', label: 'Notebook', icon: '📓' },

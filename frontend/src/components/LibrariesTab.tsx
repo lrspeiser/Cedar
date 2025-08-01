@@ -110,6 +110,8 @@ const LibrariesTab: React.FC<LibrariesTabProps> = ({ projectId }) => {
   const pendingLibraries = libraries.filter(l => l.status === 'pending');
   const installedLibraries = libraries.filter(l => l.status === 'installed');
   const failedLibraries = libraries.filter(l => l.status === 'failed');
+  const autoDetectedLibraries = libraries.filter(l => l.source === 'auto_detected');
+  const manualLibraries = libraries.filter(l => l.source === 'manual');
 
   if (loading) {
     return (
@@ -196,8 +198,32 @@ const LibrariesTab: React.FC<LibrariesTabProps> = ({ projectId }) => {
         </div>
       )}
 
+      {/* Auto-detection Notification */}
+      {autoDetectedLibraries.length > 0 && (
+        <div className="bg-purple-50 border border-purple-200 rounded-lg p-4">
+          <div className="flex items-center space-x-3">
+            <div className="text-purple-600">
+              <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 20 20">
+                <path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clipRule="evenodd" />
+              </svg>
+            </div>
+            <div>
+              <h3 className="text-sm font-medium text-purple-800">
+                Auto-detected Libraries
+              </h3>
+              <p className="text-sm text-purple-700">
+                {autoDetectedLibraries.length} library{autoDetectedLibraries.length !== 1 ? 'ies' : 'y'} detected from your code and automatically added to the project.
+                {pendingLibraries.filter(l => l.source === 'auto_detected').length > 0 && (
+                  <span> Some are being installed automatically.</span>
+                )}
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Stats */}
-      <div className="grid grid-cols-4 gap-4">
+      <div className="grid grid-cols-6 gap-4">
         <div className="bg-white p-4 rounded-lg border">
           <div className="text-2xl font-bold text-gray-600">{libraries.length}</div>
           <div className="text-sm text-gray-600">Total</div>
@@ -213,6 +239,14 @@ const LibrariesTab: React.FC<LibrariesTabProps> = ({ projectId }) => {
         <div className="bg-white p-4 rounded-lg border">
           <div className="text-2xl font-bold text-red-600">{failedLibraries.length}</div>
           <div className="text-sm text-gray-600">Failed</div>
+        </div>
+        <div className="bg-white p-4 rounded-lg border">
+          <div className="text-2xl font-bold text-purple-600">{autoDetectedLibraries.length}</div>
+          <div className="text-sm text-gray-600">Auto-detected</div>
+        </div>
+        <div className="bg-white p-4 rounded-lg border">
+          <div className="text-2xl font-bold text-blue-600">{manualLibraries.length}</div>
+          <div className="text-sm text-gray-600">Manual</div>
         </div>
       </div>
 

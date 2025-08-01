@@ -402,6 +402,7 @@ dependencies = [
  "dirs 5.0.1",
  "dotenv",
  "log",
+ "regex",
  "reqwest 0.12.22",
  "serde",
  "serde_json",

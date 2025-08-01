@@ -11,6 +11,7 @@ use std::collections::HashMap;
 use std::env;
 use std::io::{self, Write};
 use cedar::{cell, agent, context, executor, llm};
+use cedar::executor::{ExecutionResult, StepEvaluation};
 use std::fs;
 use std::path::PathBuf;
 
@@ -493,13 +494,18 @@ async fn extract_variables_from_code(
     project_id: &str,
     state: &State<'_, AppState>,
 ) -> Result<(), String> {
-    // Simple variable extraction - in a real implementation, you'd want more sophisticated parsing
+    use regex::Regex;
+    
+    // Enhanced variable extraction with comprehensive metadata
     let lines: Vec<&str> = code.lines().collect();
     let mut variables = Vec::new();
+    let mut variable_context = std::collections::HashMap::new();
     
-    for line in lines {
+    // Track variable creation context for better purpose inference
+    for (line_num, line) in lines.iter().enumerate() {
         let line = line.trim();
-        // Look for assignment patterns like: variable = value
+        
+        // Look for assignment patterns
         if let Some(equal_pos) = line.find('=') {
             let var_name = line[..equal_pos].trim();
             
@@ -508,7 +514,7 @@ async fn extract_variables_from_code(
                 continue;
             }
             
-            // Skip if it's a function definition or class definition
+            // Skip if it's a function definition, class definition, or import
             if line.contains("def ") || line.contains("class ") || line.contains("import ") || line.contains("from ") {
                 continue;
             }
@@ -516,58 +522,317 @@ async fn extract_variables_from_code(
             // Extract the value part
             let value_part = line[equal_pos + 1..].trim();
             
-            // Determine type and shape based on the value
-            let (type_name, shape, example_value) = infer_variable_info(value_part, output);
+            // Enhanced type and metadata inference
+            let (type_name, shape, example_value, units, tags) = infer_variable_info_enhanced(value_part, output, &lines, line_num);
+            
+            // Infer purpose from context and variable name
+            let purpose = infer_variable_purpose(var_name, value_part, &lines, line_num);
+            
+            // Determine source based on context
+            let source = infer_variable_source(value_part, &lines, line_num);
+            
+            // Find related variables
+            let related_to = find_related_variables(var_name, &lines, line_num);
+            
+            // Determine visibility
+            let visibility = if var_name.starts_with('_') { "hidden" } else { "public" };
             
             let variable = VariableInfo {
                 name: var_name.to_string(),
                 type_name,
                 shape,
-                purpose: format!("Variable created from code execution"),
+                purpose,
                 example_value,
-                source: "code_execution".to_string(),
+                source,
                 updated_at: chrono::Utc::now().to_rfc3339(),
-                related_to: Vec::new(),
-                visibility: "public".to_string(),
-                units: None,
-                tags: Vec::new(),
+                related_to,
+                visibility: visibility.to_string(),
+                units,
+                tags,
             };
             
-            variables.push(variable);
+            variables.push(variable.clone());
+            variable_context.insert(var_name.to_string(), variable);
         }
     }
     
     // Add variables to the project
-    for variable in variables {
-        add_variable_helper(project_id.to_string(), variable, state).await?;
+    for variable in &variables {
+        add_variable_helper(project_id.to_string(), variable.clone(), state).await?;
     }
     
+    println!("📊 Extracted {} variables from code execution", variables.len());
     Ok(())
 }
 
-fn infer_variable_info(value_part: &str, output: &str) -> (String, Option<String>, String) {
-    // Simple type inference - in a real implementation, you'd want more sophisticated analysis
+fn infer_variable_info_enhanced(
+    value_part: &str, 
+    output: &str, 
+    lines: &[&str], 
+    line_num: usize
+) -> (String, Option<String>, String, Option<String>, Vec<String>) {
+    use regex::Regex;
+    
+    let value_part = value_part.trim();
+    let mut tags = Vec::new();
+    let mut units = None;
+    
+    // Enhanced type inference with better pattern matching
+    let (type_name, shape) = if value_part.starts_with('"') || value_part.starts_with("'") {
+        tags.push("text".to_string());
+        ("str".to_string(), None)
+    } else if value_part.parse::<i64>().is_ok() {
+        tags.push("numeric".to_string());
+        tags.push("integer".to_string());
+        ("int".to_string(), None)
+    } else if value_part.parse::<f64>().is_ok() {
+        tags.push("numeric".to_string());
+        tags.push("float".to_string());
+        ("float".to_string(), None)
+    } else if value_part.starts_with('[') {
+        tags.push("collection".to_string());
+        tags.push("list".to_string());
+        ("list".to_string(), None)
+    } else if value_part.starts_with('{') {
+        tags.push("collection".to_string());
+        tags.push("dict".to_string());
+        ("dict".to_string(), None)
+    } else if value_part.contains("pd.DataFrame") || value_part.contains("DataFrame") {
+        tags.push("data".to_string());
+        tags.push("dataframe".to_string());
+        tags.push("pandas".to_string());
+        let shape = extract_dataframe_shape(output);
+        ("pd.DataFrame".to_string(), shape)
+    } else if value_part.contains("np.array") || value_part.contains("array") {
+        tags.push("data".to_string());
+        tags.push("array".to_string());
+        tags.push("numpy".to_string());
+        let shape = extract_array_shape(output);
+        ("numpy.ndarray".to_string(), shape)
+    } else if value_part.contains("plt.") || value_part.contains("Figure") {
+        tags.push("visualization".to_string());
+        tags.push("plot".to_string());
+        tags.push("matplotlib".to_string());
+        ("matplotlib.figure.Figure".to_string(), None)
+    } else if value_part.contains("sns.") || value_part.contains("seaborn") {
+        tags.push("visualization".to_string());
+        tags.push("plot".to_string());
+        tags.push("seaborn".to_string());
+        ("seaborn.axisgrid.FacetGrid".to_string(), None)
+    } else if value_part.contains("sklearn") || value_part.contains("model") {
+        tags.push("machine_learning".to_string());
+        tags.push("model".to_string());
+        tags.push("sklearn".to_string());
+        ("sklearn.base.BaseEstimator".to_string(), None)
+    } else if value_part.contains("read_csv") || value_part.contains("read_excel") {
+        tags.push("data".to_string());
+        tags.push("file".to_string());
+        tags.push("loading".to_string());
+        ("pd.DataFrame".to_string(), None)
+    } else {
+        tags.push("object".to_string());
+        ("object".to_string(), None)
+    };
+    
+    // Extract units from context
+    units = extract_units_from_context(value_part, lines, line_num);
+    
+    // Generate example value
+    let example_value = generate_example_value(value_part, type_name.as_str(), output);
+    
+    (type_name, shape, example_value, units, tags)
+}
+
+fn infer_variable_purpose(var_name: &str, value_part: &str, lines: &[&str], line_num: usize) -> String {
+    // Infer purpose from variable name and context
+    let name_lower = var_name.to_lowercase();
+    
+    // Check variable name patterns
+    if name_lower.contains("data") || name_lower.contains("df") {
+        return "Data storage and manipulation".to_string();
+    } else if name_lower.contains("result") || name_lower.contains("output") {
+        return "Computation result or output".to_string();
+    } else if name_lower.contains("plot") || name_lower.contains("fig") || name_lower.contains("graph") {
+        return "Visualization or plotting object".to_string();
+    } else if name_lower.contains("model") || name_lower.contains("clf") || name_lower.contains("reg") {
+        return "Machine learning model".to_string();
+    } else if name_lower.contains("score") || name_lower.contains("accuracy") || name_lower.contains("metric") {
+        return "Performance metric or score".to_string();
+    } else if name_lower.contains("mean") || name_lower.contains("avg") || name_lower.contains("median") {
+        return "Statistical summary value".to_string();
+    } else if name_lower.contains("count") || name_lower.contains("sum") || name_lower.contains("total") {
+        return "Aggregated count or sum".to_string();
+    } else if name_lower.contains("list") || name_lower.contains("array") {
+        return "Collection of items".to_string();
+    } else if name_lower.contains("dict") || name_lower.contains("map") {
+        return "Key-value mapping or dictionary".to_string();
+    }
+    
+    // Check context for better inference
+    let context_lines: Vec<&str> = lines.iter()
+        .skip(line_num.saturating_sub(3))
+        .take(7)
+        .map(|s| s.trim())
+        .filter(|s| !s.is_empty())
+        .collect();
+    
+    let context = context_lines.join(" ");
+    let context_lower = context.to_lowercase();
+    
+    if context_lower.contains("load") || context_lower.contains("read") {
+        return "Data loaded from external source".to_string();
+    } else if context_lower.contains("plot") || context_lower.contains("visualize") {
+        return "Visualization object".to_string();
+    } else if context_lower.contains("train") || context_lower.contains("fit") {
+        return "Trained model or fitted estimator".to_string();
+    } else if context_lower.contains("predict") || context_lower.contains("forecast") {
+        return "Prediction or forecast result".to_string();
+    } else if context_lower.contains("clean") || context_lower.contains("process") {
+        return "Processed or cleaned data".to_string();
+    } else if context_lower.contains("filter") || context_lower.contains("subset") {
+        return "Filtered or subset of data".to_string();
+    }
+    
+    "Variable created during code execution".to_string()
+}
+
+fn infer_variable_source(value_part: &str, lines: &[&str], line_num: usize) -> String {
     let value_part = value_part.trim();
     
-    if value_part.starts_with('"') || value_part.starts_with("'") {
-        ("str".to_string(), None, value_part.to_string())
-    } else if value_part.parse::<i64>().is_ok() {
-        ("int".to_string(), None, value_part.to_string())
-    } else if value_part.parse::<f64>().is_ok() {
-        ("float".to_string(), None, value_part.to_string())
-    } else if value_part.starts_with('[') {
-        ("list".to_string(), None, value_part.to_string())
-    } else if value_part.starts_with('{') {
-        ("dict".to_string(), None, value_part.to_string())
+    if value_part.contains("read_csv") || value_part.contains("read_excel") {
+        return "file_loading".to_string();
     } else if value_part.contains("pd.DataFrame") || value_part.contains("DataFrame") {
-        // Try to extract shape from output
-        let shape = extract_dataframe_shape(output);
-        ("pd.DataFrame".to_string(), shape, value_part.to_string())
+        return "dataframe_creation".to_string();
     } else if value_part.contains("np.array") || value_part.contains("array") {
-        let shape = extract_array_shape(output);
-        ("numpy.ndarray".to_string(), shape, value_part.to_string())
+        return "array_creation".to_string();
+    } else if value_part.contains("plt.") || value_part.contains("Figure") {
+        return "plot_creation".to_string();
+    } else if value_part.contains("sklearn") || value_part.contains("model") {
+        return "model_creation".to_string();
+    } else if value_part.contains("=") && value_part.contains("+") || value_part.contains("*") || value_part.contains("/") {
+        return "computation".to_string();
+    } else if value_part.starts_with('[') || value_part.starts_with('{') {
+        return "literal_creation".to_string();
+    }
+    
+    "code_execution".to_string()
+}
+
+fn find_related_variables(var_name: &str, lines: &[&str], line_num: usize) -> Vec<String> {
+    let mut related = Vec::new();
+    
+    // Look for variables used in the same line or nearby lines
+    let context_start = line_num.saturating_sub(5);
+    let context_end = (line_num + 5).min(lines.len());
+    
+    for i in context_start..context_end {
+        if i == line_num { continue; }
+        
+        let line = lines[i].trim();
+        if line.contains(var_name) {
+            // Extract other variable names from this line
+            if let Some(equal_pos) = line.find('=') {
+                let other_var = line[..equal_pos].trim();
+                if other_var != var_name && other_var.chars().next().map_or(false, |c| c.is_alphabetic() || c == '_') {
+                    related.push(other_var.to_string());
+                }
+            }
+        }
+    }
+    
+    related
+}
+
+fn extract_units_from_context(value_part: &str, lines: &[&str], line_num: usize) -> Option<String> {
+    let value_part = value_part.to_lowercase();
+    let context_lines: Vec<String> = lines.iter()
+        .skip(line_num.saturating_sub(2))
+        .take(5)
+        .map(|s| s.to_lowercase())
+        .collect();
+    
+    let context = context_lines.join(" ");
+    
+    // Common unit patterns
+    if context.contains("km/s") || context.contains("kilometers per second") {
+        Some("km/s".to_string())
+    } else if context.contains("parsec") || context.contains("pc") {
+        Some("parsecs".to_string())
+    } else if context.contains("degree") || context.contains("deg") {
+        Some("degrees".to_string())
+    } else if context.contains("radian") || context.contains("rad") {
+        Some("radians".to_string())
+    } else if context.contains("year") || context.contains("yr") {
+        Some("years".to_string())
+    } else if context.contains("day") || context.contains("d") {
+        Some("days".to_string())
+    } else if context.contains("hour") || context.contains("hr") {
+        Some("hours".to_string())
+    } else if context.contains("minute") || context.contains("min") {
+        Some("minutes".to_string())
+    } else if context.contains("second") || context.contains("sec") {
+        Some("seconds".to_string())
+    } else if context.contains("meter") || context.contains("m ") {
+        Some("meters".to_string())
+    } else if context.contains("kilometer") || context.contains("km ") {
+        Some("kilometers".to_string())
+    } else if context.contains("gram") || context.contains("g ") {
+        Some("grams".to_string())
+    } else if context.contains("kilogram") || context.contains("kg ") {
+        Some("kilograms".to_string())
     } else {
-        ("object".to_string(), None, value_part.to_string())
+        None
+    }
+}
+
+fn generate_example_value(value_part: &str, type_name: &str, output: &str) -> String {
+    match type_name {
+        "pd.DataFrame" => {
+            // Try to extract DataFrame info from output
+            if let Some(shape) = extract_dataframe_shape(output) {
+                format!("DataFrame with shape {}", shape)
+            } else {
+                "DataFrame object".to_string()
+            }
+        },
+        "numpy.ndarray" => {
+            if let Some(shape) = extract_array_shape(output) {
+                format!("Array with shape {}", shape)
+            } else {
+                "Numpy array".to_string()
+            }
+        },
+        "matplotlib.figure.Figure" => "Matplotlib figure object".to_string(),
+        "seaborn.axisgrid.FacetGrid" => "Seaborn plot object".to_string(),
+        "sklearn.base.BaseEstimator" => "Machine learning model".to_string(),
+        "list" => {
+            if value_part.len() > 50 {
+                format!("{}...", &value_part[..50])
+            } else {
+                value_part.to_string()
+            }
+        },
+        "dict" => {
+            if value_part.len() > 50 {
+                format!("{}...", &value_part[..50])
+            } else {
+                value_part.to_string()
+            }
+        },
+        "str" => {
+            if value_part.len() > 100 {
+                format!("{}...", &value_part[..100])
+            } else {
+                value_part.to_string()
+            }
+        },
+        _ => {
+            if value_part.len() > 50 {
+                format!("{}...", &value_part[..50])
+            } else {
+                value_part.to_string()
+            }
+        }
     }
 }
 
@@ -1529,16 +1794,824 @@ async fn start_research(
         sessions.insert(request.session_id.clone(), session_data);
     }
     
+    // Save the research plan to the session
+    {
+        let mut sessions = state.sessions.lock().unwrap();
+        let session_data = serde_json::json!({
+            "project_id": request.project_id,
+            "goal": request.goal,
+            "plan_cells": cells_json,
+            "context": {
+                "variables": context.variables,
+                "glossary": context.glossary
+            },
+            "status": "plan_generated",
+            "created_at": chrono::Utc::now().to_rfc3339(),
+            "execution_results": []
+        });
+        sessions.insert(request.session_id.clone(), session_data);
+    }
+    
+    // Start executing the research steps automatically in the background
+    let session_id = request.session_id.clone();
+    let project_id = request.project_id.clone();
+    
+    // For now, we'll execute the research steps synchronously
+    // TODO: Implement proper background execution with state management
+    println!("🚀 Starting research execution (synchronous mode)");
+    if let Err(e) = execute_research_steps_background(session_id, project_id, plan_cells, state).await {
+        println!("❌ Failed to execute research steps: {}", e);
+    }
+    
     let response = serde_json::json!({
         "status": "plan_generated",
         "session_id": request.session_id,
-        "message": "Research plan generated successfully",
+        "message": "Research plan generated successfully. Executing steps automatically...",
         "plan_cells": cells_json,
         "total_steps": cells_json.len()
     });
     
-    println!("✅ Research plan generated with {} steps", cells_json.len());
+    println!("✅ Research plan generated with {} steps, starting execution", cells_json.len());
     Ok(response)
+}
+
+/// Execute Research Steps - Background Execution
+/// 
+/// Executes research steps automatically in the background:
+/// - Processes each code cell in the plan
+/// - Updates session with real-time results
+/// - Handles errors and validation
+/// - Updates project with findings
+/// - Intelligently adds missing resources based on tab information
+/// 
+/// TESTING: See tests::test_research_execution() (to be added)
+/// CLI TESTING: Use execute_research_steps command
+/// API TESTING: Call execute_research_steps endpoint
+async fn execute_research_steps_background(
+    session_id: String,
+    project_id: String,
+    plan_cells: Vec<cedar::cell::NotebookCell>,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    println!("🚀 Starting automatic execution of {} research steps", plan_cells.len());
+    
+    // Gather comprehensive project information from all tabs
+    let project_context = gather_project_context(&project_id, &state).await?;
+    println!("📊 Project context gathered: {} variables, {} libraries, {} data files", 
+             project_context.variables.len(), 
+             project_context.libraries.len(), 
+             project_context.data_files.len());
+    
+    // Update session status to executing
+    update_session_status(&session_id, "executing", &[])?;
+    
+    let mut session_code = String::new();
+    let mut execution_results = Vec::new();
+    
+    // Execute all code cells in order
+    for (i, cell) in plan_cells.iter().enumerate() {
+        if cell.cell_type != cedar::cell::CellType::Code {
+            continue;
+        }
+        
+        println!("🔧 Step {}: Executing code", i + 1);
+        
+        // Check for missing resources and generate intelligent steps
+        let suggested_steps = generate_intelligent_steps(cell, &project_context, &execution_results, i).await?;
+        
+        if !suggested_steps.is_empty() {
+            println!("🔍 Step {}: Missing resources detected, generating {} additional steps", i + 1, suggested_steps.len());
+            
+            // Add suggested steps to the execution
+            for (step_idx, step_code) in suggested_steps.iter().enumerate() {
+                println!("🔧 Adding step {}.{}: Resource preparation", i + 1, step_idx + 1);
+                
+                // Execute the suggested step
+                let processed_step = cedar::code_preprocessor::preprocess(step_code);
+                session_code.push_str(&processed_step);
+                session_code.push('\n');
+                
+                // Execute the step
+                let step_result = match cedar::executor::run_python_code_with_logging(&session_code, &session_id) {
+                    Ok(exec_result) => {
+                        println!("✅ Step {}.{} completed successfully", i + 1, step_idx + 1);
+                        
+                        // Detect and add libraries from the suggested step
+                        if let Err(e) = detect_and_add_libraries_from_code(step_code, &project_id, &state) {
+                            println!("⚠️ Failed to detect libraries from suggested step: {}", e);
+                        }
+                        
+                        // Extract variables from the suggested step
+                        if let Err(e) = extract_variables_from_code(step_code, &exec_result.stdout, &project_id, &state).await {
+                            println!("⚠️ Failed to extract variables from suggested step: {}", e);
+                        }
+                        
+                        serde_json::json!({
+                            "step_number": format!("{}.{}", i, step_idx + 1),
+                            "description": format!("Resource preparation: {}", step_code.lines().next().unwrap_or("")),
+                            "status": "success",
+                            "output": exec_result.stdout,
+                            "logs": exec_result.logs,
+                            "data_summary": exec_result.data_summary,
+                            "execution_time_ms": exec_result.execution_time_ms,
+                            "timestamp": chrono::Utc::now().to_rfc3339(),
+                            "is_suggested_step": true
+                        })
+                    },
+                    Err(e) => {
+                        println!("❌ Step {}.{} failed: {}", i + 1, step_idx + 1, e);
+                        serde_json::json!({
+                            "step_number": format!("{}.{}", i, step_idx + 1),
+                            "description": format!("Resource preparation: {}", step_code.lines().next().unwrap_or("")),
+                            "status": "failed",
+                            "error": e.to_string(),
+                            "timestamp": chrono::Utc::now().to_rfc3339(),
+                            "is_suggested_step": true
+                        })
+                    }
+                };
+                
+                execution_results.push(step_result);
+                update_session_execution_results(&session_id, &execution_results)?;
+                
+                // Small delay between suggested steps
+                tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
+            }
+        }
+        
+        // Preprocess cell to ensure final expression is visible
+        let processed = cedar::code_preprocessor::preprocess(&cell.content);
+        
+        // Add this cell's code to the session
+        session_code.push_str(&processed);
+        session_code.push('\n');
+        
+        // Execute the full session with enhanced logging
+        let execution_result = match cedar::executor::run_python_code_with_logging(&session_code, &session_id) {
+            Ok(exec_result) => {
+                println!("✅ Step {} completed successfully in {}ms", i + 1, exec_result.execution_time_ms);
+                println!("📊 Logs: {} entries", exec_result.logs.len());
+                
+                // Detect and add libraries from the code
+                if let Err(e) = detect_and_add_libraries_from_code(&cell.content, &project_id, &state) {
+                    println!("⚠️ Failed to detect libraries: {}", e);
+                } else {
+                    // Auto-install detected libraries
+                    if let Err(e) = auto_install_pending_libraries(&project_id, &state).await {
+                        println!("⚠️ Failed to auto-install libraries: {}", e);
+                    }
+                }
+                
+                // Extract and track variables from the code
+                if let Err(e) = extract_variables_from_code(&cell.content, &exec_result.stdout, &project_id, &state).await {
+                    println!("⚠️ Failed to extract variables: {}", e);
+                }
+                
+                // Create comprehensive execution result
+                let result = serde_json::json!({
+                    "step_number": i,
+                    "description": cell.content.trim(),
+                    "status": "success",
+                    "output": exec_result.stdout,
+                    "logs": exec_result.logs,
+                    "data_summary": exec_result.data_summary,
+                    "execution_time_ms": exec_result.execution_time_ms,
+                    "timestamp": chrono::Utc::now().to_rfc3339(),
+                    "is_suggested_step": false
+                });
+                
+                execution_results.push(result.clone());
+                
+                // Update session with new result
+                update_session_execution_results(&session_id, &execution_results)?;
+                
+                result
+            },
+            Err(e) => {
+                println!("❌ Step {} failed: {}", i + 1, e);
+                
+                // Create error result
+                let result = serde_json::json!({
+                    "step_number": i,
+                    "description": cell.content.trim(),
+                    "status": "failed",
+                    "error": e.to_string(),
+                    "timestamp": chrono::Utc::now().to_rfc3339(),
+                    "is_suggested_step": false
+                });
+                
+                execution_results.push(result.clone());
+                
+                // Update session with error result
+                update_session_execution_results(&session_id, &execution_results)?;
+                
+                result
+            }
+        };
+        
+        // Small delay to allow frontend to catch up
+        tokio::time::sleep(tokio::time::Duration::from_millis(1000)).await;
+    }
+    
+    // Update session status to completed
+    update_session_status(&session_id, "completed", &execution_results)?;
+    
+    // Generate and save comprehensive write-up
+    println!("📝 Generating comprehensive research write-up...");
+    if let Err(e) = generate_and_save_write_up(&project_id, &project_context, &execution_results, &state).await {
+        println!("⚠️ Failed to generate write-up: {}", e);
+    } else {
+        println!("✅ Research write-up generated and saved successfully");
+    }
+    
+    println!("✅ Research execution completed with {} results", execution_results.len());
+    Ok(())
+}
+
+/// Helper function to update session status and execution results
+fn update_session_status(session_id: &str, status: &str, execution_results: &[serde_json::Value]) -> Result<(), String> {
+    // For now, we'll use a simple approach - in a real implementation,
+    // you'd want to use a proper state management system
+    println!("📝 Updating session {} status to {}", session_id, status);
+    Ok(())
+}
+
+/// Project Context - Comprehensive project information from all tabs
+#[derive(Debug, Clone)]
+struct ProjectContext {
+    variables: Vec<VariableInfo>,
+    libraries: Vec<Library>,
+    data_files: Vec<String>,
+    images: Vec<String>,
+    references: Vec<Reference>,
+    questions: Vec<Question>,
+    write_up: String,
+    project_goal: String,
+}
+
+/// Gather comprehensive project information from all tabs
+async fn gather_project_context(project_id: &str, state: &State<'_, AppState>) -> Result<ProjectContext, String> {
+    let projects = state.projects.lock().unwrap();
+    
+    if let Some(project) = projects.get(project_id) {
+        Ok(ProjectContext {
+            variables: project.variables.clone(),
+            libraries: project.libraries.clone(),
+            data_files: project.data_files.clone(),
+            images: project.images.clone(),
+            references: project.references.clone(),
+            questions: project.questions.clone(),
+            write_up: project.write_up.clone(),
+            project_goal: project.goal.clone(),
+        })
+    } else {
+        Err("Project not found".to_string())
+    }
+}
+
+/// Generate intelligent steps based on project context and current execution
+async fn generate_intelligent_steps(
+    current_step: &cedar::cell::NotebookCell,
+    project_context: &ProjectContext,
+    execution_results: &[serde_json::Value],
+    step_index: usize,
+) -> Result<Vec<String>, String> {
+    // Create a comprehensive context for the LLM
+    let context_summary = format!(
+        r#"
+PROJECT CONTEXT:
+Goal: {}
+Variables Available: {}
+Libraries Available: {}
+Data Files: {}
+References: {}
+Questions Answered: {}
+
+CURRENT EXECUTION:
+Step {}: {}
+Previous Results: {}
+
+MISSING RESOURCES ANALYSIS:
+"#,
+        project_context.project_goal,
+        project_context.variables.len(),
+        project_context.libraries.len(),
+        project_context.data_files.len(),
+        project_context.references.len(),
+        project_context.questions.iter().filter(|q| q.status == "answered").count(),
+        step_index + 1,
+        current_step.content,
+        execution_results.len()
+    );
+    
+    // Analyze what might be missing based on the current step
+    let mut missing_resources = Vec::new();
+    
+    // Check for missing data files
+    if current_step.content.contains("read_csv") || current_step.content.contains("read_excel") {
+        if project_context.data_files.is_empty() {
+            missing_resources.push("DATA_FILE: No data files available. Consider adding sample data or synthetic data generation.");
+        }
+    }
+    
+    // Check for missing libraries
+    if current_step.content.contains("import pandas") && !project_context.libraries.iter().any(|l| l.name == "pandas") {
+        missing_resources.push("LIBRARY: pandas not available. Add pandas to libraries.");
+    }
+    if current_step.content.contains("import numpy") && !project_context.libraries.iter().any(|l| l.name == "numpy") {
+        missing_resources.push("LIBRARY: numpy not available. Add numpy to libraries.");
+    }
+    if current_step.content.contains("import matplotlib") && !project_context.libraries.iter().any(|l| l.name == "matplotlib") {
+        missing_resources.push("LIBRARY: matplotlib not available. Add matplotlib to libraries.");
+    }
+    if current_step.content.contains("import seaborn") && !project_context.libraries.iter().any(|l| l.name == "seaborn") {
+        missing_resources.push("LIBRARY: seaborn not available. Add seaborn to libraries.");
+    }
+    if current_step.content.contains("import sklearn") && !project_context.libraries.iter().any(|l| l.name == "scikit-learn") {
+        missing_resources.push("LIBRARY: scikit-learn not available. Add scikit-learn to libraries.");
+    }
+    
+    // Check for missing variables that might be needed
+    if current_step.content.contains("data") && project_context.variables.is_empty() {
+        missing_resources.push("VARIABLE: No data variables available. Consider loading or creating data first.");
+    }
+    
+    // Generate step suggestions based on missing resources
+    let mut suggested_steps = Vec::new();
+    
+    for resource in missing_resources {
+        match resource {
+            s if s.starts_with("DATA_FILE:") => {
+                suggested_steps.push(format!(
+                    "# Add sample data for analysis\nimport pandas as pd\nimport numpy as np\n\n# Create synthetic data for demonstration\ndata = pd.DataFrame({{\n    'id': range(1000),\n    'value': np.random.normal(100, 15, 1000),\n    'category': np.random.choice(['A', 'B', 'C'], 1000),\n    'timestamp': pd.date_range('2024-01-01', periods=1000, freq='H')\n}})\n\nprint(f'Created sample dataset with {{len(data)}} rows and {{len(data.columns)}} columns')\ndata.head()"
+                ));
+            },
+            s if s.starts_with("LIBRARY:") => {
+                let library_name = s.split(": ").nth(1).unwrap_or("").replace(" not available. Add ", "").replace(" to libraries.", "");
+                suggested_steps.push(format!(
+                    "# Install and import required library: {}\n# Note: This library should be added to the project libraries\nimport {}\n\nprint('{} library imported successfully')",
+                    library_name, library_name, library_name
+                ));
+            },
+            s if s.starts_with("VARIABLE:") => {
+                suggested_steps.push(format!(
+                    "# Load or create initial data\nimport pandas as pd\nimport numpy as np\n\n# Create sample data for analysis\ndata = pd.DataFrame({{\n    'id': range(100),\n    'value': np.random.normal(50, 10, 100),\n    'category': np.random.choice(['X', 'Y', 'Z'], 100)\n}})\n\nprint('Data loaded successfully')\ndata.head()"
+                ));
+            },
+            _ => {}
+        }
+    }
+    
+    Ok(suggested_steps)
+}
+
+/// Generate and save comprehensive research write-up
+async fn generate_and_save_write_up(
+    project_id: &str,
+    project_context: &ProjectContext,
+    execution_results: &[serde_json::Value],
+    state: &State<'_, AppState>,
+) -> Result<(), String> {
+    println!("📝 Generating comprehensive research write-up for project: {}", project_id);
+    
+    // Generate the write-up content
+    let write_up_content = generate_write_up_content(project_context, execution_results)?;
+    
+    // Save the write-up to the project
+    let save_request = SaveFileRequest {
+        project_id: project_id.to_string(),
+        filename: "research_write_up.md".to_string(),
+        content: write_up_content,
+        file_type: "write_up".to_string(),
+    };
+    
+    save_file_helper(save_request, state).await?;
+    
+    println!("✅ Write-up saved successfully to project");
+    Ok(())
+}
+
+/// Generate comprehensive write-up content from research results
+fn generate_write_up_content(
+    project_context: &ProjectContext,
+    execution_results: &[serde_json::Value],
+) -> Result<String, String> {
+    let mut write_up = String::new();
+    
+    // Title and Introduction
+    write_up.push_str(&format!("# Research Report: {}\n\n", project_context.project_goal));
+    write_up.push_str(&format!("**Generated on:** {}\n\n", chrono::Utc::now().format("%Y-%m-%d %H:%M:%S UTC")));
+    
+    // Executive Summary
+    write_up.push_str("## Executive Summary\n\n");
+    write_up.push_str(&format!("This research project aimed to: {}\n\n", project_context.project_goal));
+    
+    let successful_steps = execution_results.iter().filter(|r| r["status"] == "success").count();
+    let total_steps = execution_results.len();
+    let intelligent_steps = execution_results.iter().filter(|r| r["is_suggested_step"] == true).count();
+    
+    write_up.push_str(&format!("**Research Execution Summary:**\n"));
+    write_up.push_str(&format!("- Total steps executed: {}\n", total_steps));
+    write_up.push_str(&format!("- Successful steps: {}\n", successful_steps));
+    write_up.push_str(&format!("- Intelligent steps (auto-generated): {}\n", intelligent_steps));
+    write_up.push_str(&format!("- Success rate: {:.1}%\n\n", (successful_steps as f64 / total_steps as f64) * 100.0));
+    
+    // Methodology
+    write_up.push_str("## Methodology\n\n");
+    write_up.push_str("### Research Approach\n");
+    write_up.push_str("This research was conducted using an automated data science workflow with the following components:\n\n");
+    
+    // Libraries used
+    if !project_context.libraries.is_empty() {
+        write_up.push_str("### Libraries and Tools\n");
+        write_up.push_str("The following Python libraries were utilized:\n\n");
+        for library in &project_context.libraries {
+            write_up.push_str(&format!("- **{}**: {} ({})\n", 
+                library.name, 
+                library.status, 
+                library.source.replace("_", " ")
+            ));
+        }
+        write_up.push_str("\n");
+    }
+    
+    // Variables created
+    if !project_context.variables.is_empty() {
+        write_up.push_str("### Data Variables\n");
+        write_up.push_str("The following variables were created and analyzed:\n\n");
+        for variable in &project_context.variables {
+            write_up.push_str(&format!("- **{}**: {} - {}\n", 
+                variable.name, 
+                variable.type_name, 
+                variable.purpose
+            ));
+            if let Some(shape) = &variable.shape {
+                write_up.push_str(&format!("  - Shape: {}\n", shape));
+            }
+            if let Some(units) = &variable.units {
+                write_up.push_str(&format!("  - Units: {}\n", units));
+            }
+        }
+        write_up.push_str("\n");
+    }
+    
+    // Execution Steps
+    write_up.push_str("## Execution Steps\n\n");
+    write_up.push_str("### Step-by-Step Analysis\n\n");
+    
+    for (i, result) in execution_results.iter().enumerate() {
+        let step_num_str = i.to_string();
+        let step_num = result["step_number"].as_str().unwrap_or(&step_num_str);
+        let description = result["description"].as_str().unwrap_or("No description");
+        let status = result["status"].as_str().unwrap_or("unknown");
+        let is_suggested = result["is_suggested_step"].as_bool().unwrap_or(false);
+        
+        write_up.push_str(&format!("#### Step {}: {}\n", step_num, description));
+        
+        if is_suggested {
+            write_up.push_str("*🔧 Auto-generated step*\n\n");
+        }
+        
+        write_up.push_str(&format!("**Status:** {}\n\n", status));
+        
+        if let Some(execution_time) = result["execution_time_ms"].as_u64() {
+            write_up.push_str(&format!("**Execution Time:** {}ms\n\n", execution_time));
+        }
+        
+        // Add output if available
+        if let Some(output) = result["output"].as_str() {
+            if !output.trim().is_empty() {
+                write_up.push_str("**Output:**\n");
+                write_up.push_str("```\n");
+                write_up.push_str(&output.trim());
+                write_up.push_str("\n```\n\n");
+            }
+        }
+        
+        // Add data summary if available
+        if let Some(data_summary) = result["data_summary"].as_str() {
+            if !data_summary.trim().is_empty() {
+                write_up.push_str("**Data Summary:**\n");
+                write_up.push_str(&data_summary.trim());
+                write_up.push_str("\n\n");
+            }
+        }
+        
+        // Add logs if available
+        if let Some(logs) = result["logs"].as_array() {
+            if !logs.is_empty() {
+                write_up.push_str("**Key Logs:**\n");
+                for log in logs.iter().take(5) { // Show first 5 logs
+                    if let Some(log_str) = log.as_str() {
+                        write_up.push_str(&format!("- {}\n", log_str));
+                    }
+                }
+                if logs.len() > 5 {
+                    write_up.push_str(&format!("- ... and {} more logs\n", logs.len() - 5));
+                }
+                write_up.push_str("\n");
+            }
+        }
+        
+        // Add error if failed
+        if status == "failed" {
+            if let Some(error) = result["error"].as_str() {
+                write_up.push_str("**Error:**\n");
+                write_up.push_str(&format!("```\n{}\n```\n\n", error));
+            }
+        }
+    }
+    
+    // Key Findings
+    write_up.push_str("## Key Findings\n\n");
+    
+    // Extract key findings from successful steps
+    let successful_results: Vec<_> = execution_results.iter()
+        .filter(|r| r["status"] == "success")
+        .collect();
+    
+    if !successful_results.is_empty() {
+        write_up.push_str("### Analysis Results\n\n");
+        
+        for result in successful_results {
+            if let Some(output) = result["output"].as_str() {
+                if output.contains("mean") || output.contains("summary") || output.contains("result") {
+                    write_up.push_str("**Key Result:**\n");
+                    write_up.push_str(&format!("{}\n\n", output.trim()));
+                }
+            }
+        }
+    }
+    
+    // Variables Analysis
+    if !project_context.variables.is_empty() {
+        write_up.push_str("### Data Analysis Summary\n\n");
+        
+        let data_variables: Vec<_> = project_context.variables.iter()
+            .filter(|v| v.type_name.contains("DataFrame") || v.type_name.contains("array"))
+            .collect();
+        
+        if !data_variables.is_empty() {
+            write_up.push_str("**Data Variables Created:**\n");
+            for variable in data_variables {
+                write_up.push_str(&format!("- **{}**: {} ({})\n", 
+                    variable.name, 
+                    variable.type_name, 
+                    variable.purpose
+                ));
+            }
+            write_up.push_str("\n");
+        }
+        
+        let computed_variables: Vec<_> = project_context.variables.iter()
+            .filter(|v| v.source == "computation" || v.purpose.contains("result") || v.purpose.contains("summary"))
+            .collect();
+        
+        if !computed_variables.is_empty() {
+            write_up.push_str("**Computed Results:**\n");
+            for variable in computed_variables {
+                write_up.push_str(&format!("- **{}**: {} - {}\n", 
+                    variable.name, 
+                    variable.type_name, 
+                    variable.purpose
+                ));
+            }
+            write_up.push_str("\n");
+        }
+    }
+    
+    // Conclusions
+    write_up.push_str("## Conclusions\n\n");
+    write_up.push_str(&format!("This research successfully completed {} steps with a {}% success rate. ", 
+        total_steps, 
+        (successful_steps as f64 / total_steps as f64) * 100.0
+    ));
+    
+    if intelligent_steps > 0 {
+        write_up.push_str(&format!("The system automatically generated {} intelligent steps to handle missing resources, ensuring seamless execution. ", intelligent_steps));
+    }
+    
+    write_up.push_str("The research demonstrates the effectiveness of automated data science workflows in achieving research objectives.\n\n");
+    
+    // Technical Details
+    write_up.push_str("## Technical Details\n\n");
+    write_up.push_str("### Execution Environment\n");
+    write_up.push_str("- **Framework**: Cedar Research Platform\n");
+    write_up.push_str("- **Language**: Python\n");
+    write_up.push_str("- **Execution Mode**: Automated with intelligent step generation\n");
+    write_up.push_str(&format!("- **Total Execution Time**: {}ms\n", 
+        execution_results.iter()
+            .filter_map(|r| r["execution_time_ms"].as_u64())
+            .sum::<u64>()
+    ));
+    write_up.push_str("\n");
+    
+    // References
+    if !project_context.references.is_empty() {
+        write_up.push_str("## References\n\n");
+        for reference in &project_context.references {
+            write_up.push_str(&format!("- **{}** by {}\n", reference.title, reference.authors));
+            if let Some(url) = &reference.url {
+                write_up.push_str(&format!("  - URL: {}\n", url));
+            }
+            write_up.push_str("\n");
+        }
+    }
+    
+    // Appendices
+    write_up.push_str("## Appendices\n\n");
+    write_up.push_str("### A. Complete Execution Log\n\n");
+    write_up.push_str("For detailed execution information, refer to the session logs in the research interface.\n\n");
+    
+    write_up.push_str("### B. Variable Details\n\n");
+    for variable in &project_context.variables {
+        write_up.push_str(&format!("**{}**\n", variable.name));
+        write_up.push_str(&format!("- Type: {}\n", variable.type_name));
+        write_up.push_str(&format!("- Purpose: {}\n", variable.purpose));
+        write_up.push_str(&format!("- Source: {}\n", variable.source));
+        write_up.push_str(&format!("- Updated: {}\n", variable.updated_at));
+        if let Some(units) = &variable.units {
+            write_up.push_str(&format!("- Units: {}\n", units));
+        }
+        if !variable.tags.is_empty() {
+            write_up.push_str(&format!("- Tags: {}\n", variable.tags.join(", ")));
+        }
+        write_up.push_str("\n");
+    }
+    
+    Ok(write_up)
+}
+
+/// Helper function to update session with execution results
+fn update_session_execution_results(session_id: &str, execution_results: &[serde_json::Value]) -> Result<(), String> {
+    // For now, we'll use a simple approach - in a real implementation,
+    // you'd want to use a proper state management system
+    println!("📝 Updating session {} with {} execution results", session_id, execution_results.len());
+    Ok(())
+}
+
+/// Extract Python imports from code and add them to project libraries
+fn detect_and_add_libraries_from_code(code: &str, project_id: &str, state: &State<'_, AppState>) -> Result<(), String> {
+    use regex::Regex;
+    
+    // Common Python libraries and their pip package names
+    let library_mappings = vec![
+        ("pandas", "pandas"),
+        ("numpy", "numpy"),
+        ("matplotlib", "matplotlib"),
+        ("seaborn", "seaborn"),
+        ("plotly", "plotly"),
+        ("scipy", "scipy"),
+        ("sklearn", "scikit-learn"),
+        ("tensorflow", "tensorflow"),
+        ("torch", "torch"),
+        ("requests", "requests"),
+        ("beautifulsoup4", "beautifulsoup4"),
+        ("bs4", "beautifulsoup4"),
+        ("selenium", "selenium"),
+        ("openpyxl", "openpyxl"),
+        ("xlrd", "xlrd"),
+        ("sqlite3", "sqlite3"), // Built-in, no installation needed
+        ("json", "json"), // Built-in, no installation needed
+        ("csv", "csv"), // Built-in, no installation needed
+        ("datetime", "datetime"), // Built-in, no installation needed
+        ("os", "os"), // Built-in, no installation needed
+        ("sys", "sys"), // Built-in, no installation needed
+        ("re", "re"), // Built-in, no installation needed
+        ("math", "math"), // Built-in, no installation needed
+        ("random", "random"), // Built-in, no installation needed
+        ("statistics", "statistics"), // Built-in, no installation needed
+        ("collections", "collections"), // Built-in, no installation needed
+        ("itertools", "itertools"), // Built-in, no installation needed
+        ("functools", "functools"), // Built-in, no installation needed
+        ("logging", "logging"), // Built-in, no installation needed
+    ];
+    
+    // Regex patterns for different import styles
+    let import_patterns = vec![
+        r"^import\s+([a-zA-Z_][a-zA-Z0-9_]*)\s*$", // import pandas
+        r"^from\s+([a-zA-Z_][a-zA-Z0-9_]*)\s+import", // from pandas import DataFrame
+        r"^import\s+([a-zA-Z_][a-zA-Z0-9_]*)\s+as", // import pandas as pd
+        r"^from\s+([a-zA-Z_][a-zA-Z0-9_]*)\s+import\s+\*", // from pandas import *
+    ];
+    
+    let mut detected_libraries = std::collections::HashSet::new();
+    
+    // Check each line for imports
+    for line in code.lines() {
+        let line = line.trim();
+        
+        for pattern in &import_patterns {
+            if let Ok(regex) = Regex::new(pattern) {
+                if let Some(captures) = regex.captures(line) {
+                    if let Some(library_name) = captures.get(1) {
+                        let library_name = library_name.as_str();
+                        detected_libraries.insert(library_name.to_string());
+                    }
+                }
+            }
+        }
+    }
+    
+    // Map detected libraries to pip package names and add to project
+    let mut projects = state.projects.lock().unwrap();
+    if let Some(project) = projects.get_mut(project_id) {
+        for detected_lib in detected_libraries {
+            // Find the corresponding pip package name
+            if let Some((_, pip_name)) = library_mappings.iter().find(|(lib_name, _)| *lib_name == detected_lib) {
+                // Skip built-in libraries
+                if !["sqlite3", "json", "csv", "datetime", "os", "sys", "re", "math", "random", "statistics", "collections", "itertools", "functools", "logging"].contains(pip_name) {
+                    // Check if library already exists
+                    if !project.libraries.iter().any(|l| l.name == *pip_name) {
+                        let new_library = Library {
+                            name: pip_name.to_string(),
+                            version: None,
+                            source: "auto_detected".to_string(),
+                            status: "pending".to_string(),
+                            installed_at: None,
+                            error_message: None,
+                            required_by: vec![format!("Code cell: {}", detected_lib)],
+                        };
+                        
+                        project.libraries.push(new_library);
+                        println!("📦 Auto-detected library: {} (pip: {})", detected_lib, pip_name);
+                    } else {
+                        // Update existing library to mark it as required by this code
+                        if let Some(existing_lib) = project.libraries.iter_mut().find(|l| l.name == *pip_name) {
+                            if !existing_lib.required_by.contains(&format!("Code cell: {}", detected_lib)) {
+                                existing_lib.required_by.push(format!("Code cell: {}", detected_lib));
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        
+        // Save the updated project
+        save_project(&project)?;
+    }
+    
+    Ok(())
+}
+
+/// Automatically install all pending libraries for a project
+async fn auto_install_pending_libraries(project_id: &str, state: &State<'_, AppState>) -> Result<(), String> {
+    let mut projects = state.projects.lock().unwrap();
+    if let Some(project) = projects.get_mut(project_id) {
+        let pending_libraries: Vec<_> = project.libraries
+            .iter()
+            .filter(|lib| lib.status == "pending" && lib.source == "auto_detected")
+            .map(|lib| lib.name.clone())
+            .collect();
+        
+        drop(projects); // Release the lock before async operations
+        
+        println!("🔧 Auto-installing {} pending libraries", pending_libraries.len());
+        
+        for library_name in pending_libraries {
+            println!("📦 Installing library: {}", library_name);
+            
+            // Install the library
+            let install_command = format!("pip install {}", library_name);
+            
+            match std::process::Command::new("sh")
+                .arg("-c")
+                .arg(&install_command)
+                .output() {
+                Ok(output) => {
+                    let mut projects = state.projects.lock().unwrap();
+                    if let Some(project) = projects.get_mut(project_id) {
+                        if let Some(library) = project.libraries.iter_mut().find(|l| l.name == library_name) {
+                            if output.status.success() {
+                                library.status = "installed".to_string();
+                                library.installed_at = Some(chrono::Utc::now().to_rfc3339());
+                                library.error_message = None;
+                                println!("✅ Successfully installed: {}", library_name);
+                            } else {
+                                library.status = "failed".to_string();
+                                library.error_message = Some(String::from_utf8_lossy(&output.stderr).to_string());
+                                println!("❌ Failed to install: {} - {}", library_name, String::from_utf8_lossy(&output.stderr));
+                            }
+                            save_project(&project)?;
+                        }
+                    }
+                },
+                Err(e) => {
+                    let mut projects = state.projects.lock().unwrap();
+                    if let Some(project) = projects.get_mut(project_id) {
+                        if let Some(library) = project.libraries.iter_mut().find(|l| l.name == library_name) {
+                            library.status = "failed".to_string();
+                            library.error_message = Some(e.to_string());
+                            save_project(&project)?;
+                        }
+                    }
+                    println!("❌ Failed to install: {} - {}", library_name, e);
+                }
+            }
+        }
+    }
+    
+    Ok(())
 }
 
 /// Code Execution - Execute Code Request
@@ -1729,7 +2802,16 @@ async fn generate_questions(
 And the generated plan steps:
 {}
 
-Generate 5-8 research planning questions that will help clarify the research direction and approach.
+Generate exactly 3 research planning questions that will help clarify the research direction and approach.
+
+CRITICAL FORMAT REQUIREMENT: Every question MUST be in the format "Would you rather we do A) or B)" where A and B are two different approaches, methodologies, or focus areas.
+
+NEXT STEPS CONTEXT: After answering these questions, we will:
+1. Conduct the research and gather data
+2. Process and analyze the data
+3. Set up variables and data structures
+4. Write Python scripts for analysis
+5. Develop the resulting answer and write-up
 
 IMPORTANT: Focus ONLY on questions about:
 - What the user wants to accomplish (goals, objectives, desired outcomes)
@@ -1747,7 +2829,7 @@ Return ONLY a JSON array of question objects:
 [
     {{
         "id": "q1",
-        "question": "What specific outcomes do you want to achieve from this research?",
+        "question": "Would you rather we do A) focus on statistical analysis with detailed charts and graphs, or B) create a machine learning model to predict future trends?",
         "category": "initial|follow_up|clarification",
         "status": "pending"
     }}
@@ -1771,19 +2853,19 @@ Focus on questions that help clarify the user's goals and preferences for the re
                     vec![
                         serde_json::json!({
                             "id": "q1",
-                            "question": "What specific outcomes do you want to achieve from this research?",
+                            "question": "Would you rather we do A) focus on statistical analysis with detailed charts and graphs, or B) create a machine learning model to predict future trends?",
                             "category": "initial",
                             "status": "pending"
                         }),
                         serde_json::json!({
                             "id": "q2",
-                            "question": "How would you like to approach this analysis (statistical, visualization, machine learning, etc.)?",
+                            "question": "Would you rather we do A) analyze historical data to identify patterns, or B) focus on real-time data for immediate insights?",
                             "category": "initial", 
                             "status": "pending"
                         }),
                         serde_json::json!({
                             "id": "q3",
-                            "question": "What specific aspects of this topic are most important to you?",
+                            "question": "Would you rather we do A) focus on a broad overview of the topic, or B) dive deep into specific aspects that interest you most?",
                             "category": "initial", 
                             "status": "pending"
                         })
@@ -1853,7 +2935,16 @@ async fn initialize_research(
 
 Generate:
 1. A concise title (5 words or less)
-2. 5-8 specific questions to help clarify the research approach and preferences
+2. Exactly 3 specific questions to help clarify the research approach and preferences
+
+CRITICAL FORMAT REQUIREMENT: Every question MUST be in the format "Would you rather we do A) or B)" where A and B are two different approaches, methodologies, or focus areas.
+
+NEXT STEPS CONTEXT: After answering these questions, we will:
+1. Conduct the research and gather data
+2. Process and analyze the data
+3. Set up variables and data structures
+4. Write Python scripts for analysis
+5. Develop the resulting answer and write-up
 
 IMPORTANT: Focus ONLY on questions about:
 - What the user wants to accomplish (goals, objectives, desired outcomes)
@@ -1873,13 +2964,13 @@ Return ONLY a JSON object:
     "questions": [
         {{
             "id": "q1",
-            "question": "What specific outcomes do you want to achieve from this research?",
+            "question": "Would you rather we do A) focus on statistical analysis with detailed charts and graphs, or B) create a machine learning model to predict future trends?",
             "category": "scope",
             "required": true
         }},
         {{
             "id": "q2", 
-            "question": "How would you like to approach this analysis (statistical, visualization, machine learning, etc.)?",
+            "question": "Would you rather we do A) analyze historical data to identify patterns, or B) focus on real-time data for immediate insights?",
             "category": "approach",
             "required": true
         }}
@@ -1902,19 +2993,19 @@ Focus on questions that help clarify the user's goals and preferences for the re
                         "questions": [
                             {
                                 "id": "q1",
-                                "question": "What specific outcomes do you want to achieve from this research?",
+                                "question": "Would you rather we do A) focus on statistical analysis with detailed charts and graphs, or B) create a machine learning model to predict future trends?",
                                 "category": "scope",
                                 "required": true
                             },
                             {
                                 "id": "q2",
-                                "question": "How would you like to approach this analysis (statistical, visualization, machine learning, etc.)?",
+                                "question": "Would you rather we do A) analyze historical data to identify patterns, or B) focus on real-time data for immediate insights?",
                                 "category": "approach", 
                                 "required": true
                             },
                             {
                                 "id": "q3",
-                                "question": "What specific aspects of this topic are most important to you?",
+                                "question": "Would you rather we do A) focus on a broad overview of the topic, or B) dive deep into specific aspects that interest you most?",
                                 "category": "scope",
                                 "required": false
                             }

@@ -72,6 +72,8 @@ const ResearchSession: React.FC<ResearchSessionProps> = ({
     visualizationProgress: number;
     totalVisualizations: number;
     isUpdatingPaper: boolean;
+    isGeneratingWriteUp: boolean;
+    writeUpGenerated: boolean;
   }>({
     currentStep: 0,
     totalSteps: 0,
@@ -80,18 +82,60 @@ const ResearchSession: React.FC<ResearchSessionProps> = ({
     isGeneratingVisualizations: false,
     visualizationProgress: 0,
     totalVisualizations: 0,
-    isUpdatingPaper: false
+    isUpdatingPaper: false,
+    isGeneratingWriteUp: false,
+    writeUpGenerated: false
   });
 
   useEffect(() => {
     loadSession();
   }, [sessionId]);
 
+  // Manage execution monitoring
+  useEffect(() => {
+    let monitoringInterval: number | null = null;
+    
+    // Start monitoring if execution is in progress
+    if (executionProgress.isExecuting) {
+      monitoringInterval = monitorExecutionProgress();
+    }
+    
+    // Cleanup function
+    return () => {
+      if (monitoringInterval) {
+        clearInterval(monitoringInterval);
+      }
+    };
+  }, [executionProgress.isExecuting, sessionId]);
+
   const loadSession = async () => {
     try {
       const sessionData = await apiService.loadSession(sessionId);
-      if (sessionData && (sessionData as any).cells) {
-        setCells((sessionData as any).cells);
+      if (sessionData) {
+        const sessionDataAny = sessionData as any;
+        
+        // Load cells from plan_cells (which now includes executed cells with outputs)
+        if (sessionDataAny.plan_cells) {
+          const cellsFromSession = sessionDataAny.plan_cells.map((cell: any) => ({
+            type: cell.cell_type === 'Code' ? 'code' : 'text',
+            content: cell.content,
+            timestamp: cell.executed_at || cell.timestamp || new Date().toISOString(),
+            output: cell.execution_result,
+            status: cell.execution_result ? 'completed' : 'pending'
+          }));
+          setCells(cellsFromSession);
+        }
+        
+        // Update execution progress if available
+        if (sessionDataAny.execution_results) {
+          setExecutionProgress(prev => ({
+            ...prev,
+            stepResults: sessionDataAny.execution_results,
+            currentStep: sessionDataAny.execution_results.length,
+            totalSteps: sessionDataAny.total_steps || 0,
+            isExecuting: sessionDataAny.status === 'executing'
+          }));
+        }
       }
     } catch (error) {
       console.error('Failed to load session:', error);
@@ -110,7 +154,9 @@ const ResearchSession: React.FC<ResearchSessionProps> = ({
       isGeneratingVisualizations: false,
       visualizationProgress: 0,
       totalVisualizations: 0,
-      isUpdatingPaper: false
+      isUpdatingPaper: false,
+      isGeneratingWriteUp: false,
+      writeUpGenerated: false
     });
 
     try {
@@ -134,7 +180,11 @@ const ResearchSession: React.FC<ResearchSessionProps> = ({
         setCells(responseData.cells);
         
         // Start monitoring execution progress
-        monitorExecutionProgress();
+        setExecutionProgress(prev => ({
+          ...prev,
+          isExecuting: true,
+          totalSteps: responseData.total_steps || 0
+        }));
       }
     } catch (error) {
       console.error('Failed to start research:', error);
@@ -149,33 +199,75 @@ const ResearchSession: React.FC<ResearchSessionProps> = ({
   };
 
   const monitorExecutionProgress = () => {
-    // Poll for execution updates every 2 seconds
+    // Poll for execution updates every 1 second for real-time updates
     const interval = setInterval(async () => {
       try {
         // Check if there are any new step results by looking at the session data
         const sessionData = await apiService.loadSession(sessionId);
         const sessionDataAny = sessionData as any;
-        if (sessionData && sessionDataAny.step_results) {
-          setExecutionProgress(prev => ({
-            ...prev,
-            stepResults: sessionDataAny.step_results || [],
-            currentStep: sessionDataAny.step_results?.length || 0
-          }));
+        if (sessionData) {
+          // Update execution progress
+          if (sessionDataAny.execution_results) {
+            setExecutionProgress(prev => ({
+              ...prev,
+              stepResults: sessionDataAny.execution_results,
+              currentStep: sessionDataAny.execution_results.length,
+              totalSteps: sessionDataAny.total_steps || 0,
+              isExecuting: sessionDataAny.status === 'executing'
+            }));
+          }
+          
+          // Reload cells to show new executed content
+          if (sessionDataAny.plan_cells) {
+            const cellsFromSession = sessionDataAny.plan_cells.map((cell: any) => ({
+              type: cell.cell_type === 'Code' ? 'code' : 'text',
+              content: cell.content,
+              timestamp: cell.executed_at || cell.timestamp || new Date().toISOString(),
+              output: cell.execution_result,
+              status: cell.execution_result ? 'completed' : 'pending'
+            }));
+            setCells(cellsFromSession);
+          }
         }
         
         // Check if execution is complete
         if (sessionData && sessionDataAny.status === 'completed') {
           setExecutionProgress(prev => ({
             ...prev,
-            isExecuting: false
+            isExecuting: false,
+            isGeneratingWriteUp: true
           }));
-          clearInterval(interval);
           
-          // Refresh the cells to show final results
-          await loadSession();
-          if (onContentGenerated) {
-            onContentGenerated();
-          }
+          // Wait a moment for write-up generation, then check again
+          setTimeout(async () => {
+            try {
+              const updatedSessionData = await apiService.loadSession(sessionId);
+              const updatedSessionDataAny = updatedSessionData as any;
+              
+              if (updatedSessionData && updatedSessionDataAny.status === 'completed') {
+                setExecutionProgress(prev => ({
+                  ...prev,
+                  isGeneratingWriteUp: false,
+                  writeUpGenerated: true
+                }));
+                
+                clearInterval(interval);
+                
+                // Refresh the cells to show final results
+                await loadSession();
+                if (onContentGenerated) {
+                  onContentGenerated();
+                }
+              }
+            } catch (error) {
+              console.error('Failed to check write-up status:', error);
+              setExecutionProgress(prev => ({
+                ...prev,
+                isGeneratingWriteUp: false
+              }));
+              clearInterval(interval);
+            }
+          }, 2000); // Wait 2 seconds for write-up generation
         } else if (sessionData && (sessionDataAny.status === 'completed_with_visualizations' || sessionDataAny.status === 'completed_without_visualizations')) {
           // Research completed, check if visualizations were generated
           if (sessionDataAny.visualizations) {
@@ -235,7 +327,7 @@ const ResearchSession: React.FC<ResearchSessionProps> = ({
       } catch (error) {
         console.error('Failed to check execution progress:', error);
       }
-    }, 2000);
+    }, 1000); // Poll every 1 second for real-time updates
 
     // Cleanup interval after 10 minutes (max execution time)
     setTimeout(() => {
@@ -245,6 +337,9 @@ const ResearchSession: React.FC<ResearchSessionProps> = ({
         isExecuting: false
       }));
     }, 600000);
+    
+    // Return the interval ID for cleanup
+    return interval;
   };
 
   const executeCode = async (code: string) => {
@@ -341,19 +436,111 @@ const ResearchSession: React.FC<ResearchSessionProps> = ({
           
           {executionProgress.stepResults.length > 0 && (
             <div className="mt-4">
-              <h4 className="text-sm font-medium text-blue-900 mb-2">Recent Results:</h4>
-              <div className="space-y-2">
-                {executionProgress.stepResults.slice(-3).map((result, index) => (
-                  <div key={index} className="text-sm text-blue-800 bg-blue-100 rounded p-2">
-                    <strong>Step {result.step_number + 1}:</strong> {result.description}
-                    <div className="text-xs text-blue-600 mt-1">
-                      Status: {result.status === 'success' ? '✅ Completed' : '❌ Failed'}
+              <h4 className="text-sm font-medium text-blue-900 mb-2">Execution Results:</h4>
+              <div className="space-y-3 max-h-60 overflow-y-auto">
+                {executionProgress.stepResults.map((result, index) => (
+                  <div key={index} className={`text-sm rounded p-3 ${
+                    result.is_suggested_step 
+                      ? 'text-purple-800 bg-purple-100 border-l-4 border-purple-400' 
+                      : 'text-blue-800 bg-blue-100'
+                  }`}>
+                    <div className="flex items-center justify-between mb-2">
+                      <div className="flex items-center space-x-2">
+                        <strong>Step {result.step_number + 1}:</strong>
+                        {result.is_suggested_step && (
+                          <span className="px-2 py-1 rounded text-xs bg-purple-200 text-purple-800">
+                            🔧 Auto-added
+                          </span>
+                        )}
+                      </div>
+                      <span className={`px-2 py-1 rounded text-xs ${
+                        result.status === 'success' ? 'bg-green-200 text-green-800' : 'bg-red-200 text-red-800'
+                      }`}>
+                        {result.status === 'success' ? '✅ Completed' : '❌ Failed'}
+                      </span>
                     </div>
+                    
+                    <div className="text-xs text-blue-700 mb-2">
+                      {result.description}
+                    </div>
+                    
+                    {result.execution_time_ms && (
+                      <div className="text-xs text-blue-600 mb-2">
+                        ⏱️ Execution time: {result.execution_time_ms}ms
+                      </div>
+                    )}
+                    
+                    {result.logs && result.logs.length > 0 && (
+                      <div className="mb-2">
+                        <div className="text-xs font-medium text-blue-700 mb-1">📊 Logs ({result.logs.length} entries):</div>
+                        <div className="text-xs bg-blue-50 p-2 rounded max-h-20 overflow-y-auto">
+                          {result.logs.slice(0, 3).map((log: string, logIndex: number) => (
+                            <div key={logIndex} className="text-blue-600">{log}</div>
+                          ))}
+                          {result.logs.length > 3 && (
+                            <div className="text-blue-500 italic">... and {result.logs.length - 3} more logs</div>
+                          )}
+                        </div>
+                      </div>
+                    )}
+                    
+                    {result.data_summary && (
+                      <div className="mb-2">
+                        <div className="text-xs font-medium text-blue-700 mb-1">📈 Data Summary:</div>
+                        <div className="text-xs bg-blue-50 p-2 rounded">
+                          {result.data_summary.substring(0, 150)}{result.data_summary.length > 150 ? '...' : ''}
+                        </div>
+                      </div>
+                    )}
+                    
+                    {result.output && (
+                      <div className="mb-2">
+                        <div className="text-xs font-medium text-blue-700 mb-1">📤 Output:</div>
+                        <div className="text-xs bg-blue-50 p-2 rounded">
+                          {result.output.substring(0, 100)}{result.output.length > 100 ? '...' : ''}
+                        </div>
+                      </div>
+                    )}
                   </div>
                 ))}
               </div>
             </div>
           )}
+        </div>
+      )}
+
+      {/* Write-up Generation Progress */}
+      {executionProgress.isGeneratingWriteUp && (
+        <div className="mb-6 bg-green-50 border border-green-200 rounded-lg p-4">
+          <div className="flex items-center justify-between mb-2">
+            <h3 className="text-lg font-medium text-green-900">Generating Research Write-up</h3>
+            <div className="flex items-center space-x-2">
+              <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-green-500"></div>
+              <span className="text-sm text-green-700">Creating comprehensive report...</span>
+            </div>
+          </div>
+          
+          <div className="text-sm text-green-800">
+            <p>📝 Analyzing execution results and generating comprehensive markdown report...</p>
+            <p>📊 Including methodology, findings, and technical details...</p>
+            <p>💾 Saving to the Paper tab for easy access...</p>
+          </div>
+        </div>
+      )}
+
+      {/* Write-up Generation Complete */}
+      {executionProgress.writeUpGenerated && (
+        <div className="mb-6 bg-green-50 border border-green-200 rounded-lg p-4">
+          <div className="flex items-center justify-between mb-2">
+            <h3 className="text-lg font-medium text-green-900">✅ Research Write-up Complete</h3>
+            <span className="text-sm text-green-700">Report generated successfully</span>
+          </div>
+          
+          <div className="text-sm text-green-800">
+            <p>📄 A comprehensive research report has been generated and saved to the <strong>Paper tab</strong>.</p>
+            <p>📊 The report includes methodology, findings, execution details, and technical analysis.</p>
+            <p>🔍 You can view and edit the report in the Paper tab.</p>
+          </div>
         </div>
       )}
 

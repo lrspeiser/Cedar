@@ -12,6 +12,9 @@ interface Project {
   images: string[];
   references: any[];
   write_up: string;
+  variables: any[];
+  questions: any[];
+  libraries: any[];
   researchAnswers?: Record<string, string>;
 }
 
@@ -41,7 +44,7 @@ export const ProjectManager: React.FC<ProjectManagerProps> = ({ onProjectSelect,
     }
   };
 
-  const handleResearchComplete = async (title: string, goal: string, answers: Record<string, string>) => {
+  const handleResearchComplete = async (title: string, goal: string, answers: Record<string, string>, questions: any[]) => {
     try {
       setLoading(true);
       
@@ -49,14 +52,39 @@ export const ProjectManager: React.FC<ProjectManagerProps> = ({ onProjectSelect,
       const newProject = await apiService.createProject({
         name: title,
         goal: goal,
+      }) as Project;
+      
+      // Convert research initialization answers to questions and save them
+      const questionPromises = questions.map(async (questionData) => {
+        const answer = answers[questionData.id];
+        if (!answer) return;
+        
+        const question = {
+          id: questionData.id,
+          question: questionData.question,
+          answer: answer,
+          category: questionData.category,
+          created_at: new Date().toISOString(),
+          answered_at: new Date().toISOString(),
+          status: 'answered',
+          related_to: []
+        };
+        
+        try {
+          await apiService.addQuestion(newProject.id, question);
+        } catch (error) {
+          console.error('Failed to add question:', error);
+        }
       });
       
-      setProjects(prev => [...prev, newProject as Project]);
+      await Promise.all(questionPromises);
+      
+      setProjects(prev => [...prev, newProject]);
       setShowResearchInit(false);
       
       // Store the answers in the project for later use
       const projectWithAnswers = {
-        ...(newProject as any),
+        ...newProject,
         researchAnswers: answers,
         variables: [],
         questions: [],
@@ -64,7 +92,7 @@ export const ProjectManager: React.FC<ProjectManagerProps> = ({ onProjectSelect,
       };
       
       // Auto-select the new project
-      onProjectSelect(projectWithAnswers as Project);
+      onProjectSelect(projectWithAnswers);
     } catch (error) {
       console.error('Failed to create project:', error);
       alert('Failed to create project');

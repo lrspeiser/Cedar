@@ -30,3 +30,4 @@ cedar-core = { path = "../cedar-core" }
 dotenv = "0.15"
 dirs = "5.0"
 uuid = { version = "1", features = ["v4"] }
+regex = "1.7"

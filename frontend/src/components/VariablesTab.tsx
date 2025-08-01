@@ -126,7 +126,27 @@ const VariablesTab: React.FC<VariablesTabProps> = ({ projectId }) => {
           </p>
         </div>
       ) : (
-        <div className="bg-white rounded-lg shadow overflow-hidden">
+        <>
+          {/* Variable Detection Notification */}
+          <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 mb-6">
+            <div className="flex items-center space-x-3">
+              <div className="text-blue-600">
+                <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 20 20">
+                  <path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clipRule="evenodd" />
+                </svg>
+              </div>
+              <div>
+                <h3 className="text-sm font-medium text-blue-800">
+                  Automatic Variable Detection
+                </h3>
+                <p className="text-sm text-blue-700">
+                  {variables.length} variable{variables.length !== 1 ? 's' : ''} detected from code execution with comprehensive metadata including type, shape, purpose, and relationships.
+                </p>
+              </div>
+            </div>
+          </div>
+
+          <div className="bg-white rounded-lg shadow overflow-hidden">
           <div className="overflow-x-auto">
             <table className="min-w-full divide-y divide-gray-200">
               <thead className="bg-gray-50">
@@ -141,7 +161,16 @@ const VariablesTab: React.FC<VariablesTabProps> = ({ projectId }) => {
                     Purpose
                   </th>
                   <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    Example Value
+                  </th>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    Source & Units
+                  </th>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                     Tags
+                  </th>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    Related
                   </th>
                   <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                     Updated
@@ -194,6 +223,23 @@ const VariablesTab: React.FC<VariablesTabProps> = ({ projectId }) => {
                       )}
                     </td>
                     <td className="px-6 py-4">
+                      <div className="text-sm text-gray-700 max-w-xs truncate" title={variable.example_value}>
+                        {variable.example_value}
+                      </div>
+                    </td>
+                    <td className="px-6 py-4">
+                      <div className="flex flex-col space-y-1">
+                        <span className="text-xs text-gray-500 capitalize">
+                          {variable.source.replace('_', ' ')}
+                        </span>
+                        {variable.units && (
+                          <span className="text-xs text-blue-600 font-medium">
+                            {variable.units}
+                          </span>
+                        )}
+                      </div>
+                    </td>
+                    <td className="px-6 py-4">
                       {editingVariable === variable.name ? (
                         <input
                           type="text"
@@ -214,6 +260,23 @@ const VariablesTab: React.FC<VariablesTabProps> = ({ projectId }) => {
                           ))}
                         </div>
                       )}
+                    </td>
+                    <td className="px-6 py-4">
+                      <div className="flex flex-wrap gap-1">
+                        {variable.related_to.slice(0, 2).map((related, index) => (
+                          <span
+                            key={index}
+                            className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-gray-100 text-gray-700"
+                          >
+                            {related}
+                          </span>
+                        ))}
+                        {variable.related_to.length > 2 && (
+                          <span className="text-xs text-gray-500">
+                            +{variable.related_to.length - 2}
+                          </span>
+                        )}
+                      </div>
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
                       {formatTimestamp(variable.updated_at)}
@@ -257,6 +320,7 @@ const VariablesTab: React.FC<VariablesTabProps> = ({ projectId }) => {
             </table>
           </div>
         </div>
+        </>
       )}
 
       <div className="mt-6 p-4 bg-blue-50 rounded-lg">
