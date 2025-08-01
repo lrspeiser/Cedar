@@ -123,12 +123,12 @@ const ResearchPlanComponent: React.FC<ResearchPlanComponentProps> = ({
       const projectContext = {
         variables,
         libraries,
-        data_files: project.data_files || [],
-        images: project.images || [],
-        references: project.references || [],
-        questions: project.questions || [],
-        write_up: project.write_up || '',
-        project_goal: project.goal
+        data_files: (project as any).data_files || [],
+        images: (project as any).images || [],
+        references: (project as any).references || [],
+        questions: (project as any).questions || [],
+        write_up: (project as any).write_up || '',
+        project_goal: (project as any).goal
       };
 
       // Get completed step results
@@ -149,7 +149,7 @@ const ResearchPlanComponent: React.FC<ResearchPlanComponentProps> = ({
       console.log('✅ Next steps generated:', nextSteps);
       
       if (onNextStepsGenerated) {
-        onNextStepsGenerated(nextSteps);
+        onNextStepsGenerated(nextSteps as ResearchPlanStep[]);
       }
 
     } catch (error) {

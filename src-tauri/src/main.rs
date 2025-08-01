@@ -2085,7 +2085,7 @@ fn update_session_status(session_id: &str, status: &str, execution_results: &[se
 }
 
 /// Project Context - Comprehensive project information from all tabs
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Deserialize, serde::Serialize)]
 struct ProjectContext {
     variables: Vec<VariableInfo>,
     libraries: Vec<Library>,
@@ -2804,7 +2804,7 @@ struct GenerateNextStepsRequest {
     project_context: ProjectContext,
 }
 
-#[derive(serde::Serialize)]
+#[derive(serde::Deserialize, serde::Serialize)]
 struct ResearchSource {
     title: String,
     authors: String,
@@ -2832,7 +2832,7 @@ struct ResearchQuestion {
 struct ResearchPlanStep {
     id: String,
     title: String,
-    description: String;
+    description: String,
     code: Option<String>,
     status: String, // "pending", "ready", "executing", "completed", "failed"
     order: usize,
@@ -3488,7 +3488,7 @@ async fn execute_step(
 async fn generate_next_steps(
     request: GenerateNextStepsRequest,
     state: State<'_, AppState>,
-) -> Result<Vec<ResearchPlanStep>, String> {
+) -> Result<serde_json::Value, String> {
     println!("🔄 Generating next steps based on completed work");
     
     // Check if API key is available
@@ -3592,7 +3592,8 @@ Focus on generating steps that will provide meaningful insights and move the res
     };
     
     // Parse the response into our struct
-    let steps_array = response_json.as_array().unwrap_or(&vec![]);
+    let empty_vec = vec![];
+    let steps_array = response_json.as_array().unwrap_or(&empty_vec);
     
     let steps: Vec<ResearchPlanStep> = steps_array
         .iter()
@@ -3608,7 +3609,7 @@ Focus on generating steps that will provide meaningful insights and move the res
     
     println!("✅ Generated {} next steps", steps.len());
     
-    Ok(steps)
+    Ok(serde_json::to_value(steps).unwrap_or_else(|_| serde_json::json!([])))
 }
 
 #[tauri::command]

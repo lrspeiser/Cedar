@@ -35,6 +35,7 @@
 import React, { useState, useEffect } from 'react';
 import { apiService } from '../api';
 import CellComponent from './CellComponent';
+import ResearchPlanComponent from './ResearchPlanComponent';
 
 interface Cell {
   type: 'text' | 'code';
@@ -43,6 +44,24 @@ interface Cell {
   output?: string;
   validation?: string;
   status?: string;
+}
+
+interface ResearchPlanStep {
+  id: string;
+  title: string;
+  description: string;
+  code?: string;
+  status: string;
+  order: number;
+}
+
+interface ResearchPlan {
+  id: string;
+  title: string;
+  description: string;
+  steps: ResearchPlanStep[];
+  created_at: string;
+  status: string;
 }
 
 interface ResearchSessionProps {
@@ -63,6 +82,8 @@ const ResearchSession: React.FC<ResearchSessionProps> = ({
   const [cells, setCells] = useState<Cell[]>([]);
   const [currentGoal, setCurrentGoal] = useState(goal);
   const [isLoading, setIsLoading] = useState(false);
+  const [researchPlan, setResearchPlan] = useState<ResearchPlan | null>(null);
+  const [showResearchPlan, setShowResearchPlan] = useState(false);
   const [executionProgress, setExecutionProgress] = useState<{
     currentStep: number;
     totalSteps: number;
@@ -177,6 +198,83 @@ const ResearchSession: React.FC<ResearchSessionProps> = ({
     }
   };
 
+  const generateResearchPlan = async (initialization: any) => {
+    try {
+      console.log('📋 Generating research plan...');
+      
+      const plan = await apiService.generateResearchPlan({
+        goal: currentGoal,
+        answers: answers || {},
+        sources: initialization.sources,
+        background_summary: initialization.background_summary
+      });
+
+      console.log('✅ Research plan generated:', plan);
+      setResearchPlan(plan as ResearchPlan);
+      setShowResearchPlan(true);
+      
+      // Add plan to cells
+      const planCell: Cell = {
+        type: 'text',
+        content: `## Research Plan Generated\n\n**${(plan as any).title}**\n\n${(plan as any).description}\n\n**Total Steps:** ${(plan as any).steps.length}\n\nClick "View Plan" to see the detailed steps and start execution.`,
+        timestamp: new Date().toISOString()
+      };
+      
+      setCells(prev => [...prev, planCell]);
+      
+    } catch (error) {
+      console.error('❌ Failed to generate research plan:', error);
+      
+      const errorCell: Cell = {
+        type: 'text',
+        content: `## Error Generating Research Plan\n\nFailed to generate research plan: ${error}`,
+        timestamp: new Date().toISOString()
+      };
+      
+      setCells(prev => [...prev, errorCell]);
+    }
+  };
+
+  const handleStepCompleted = (stepId: string, result: any) => {
+    console.log(`✅ Step completed: ${stepId}`, result);
+    
+    // Add step result to cells
+    const resultCell: Cell = {
+      type: 'text',
+      content: `## Step Completed: ${result.step_title}\n\n**Description:** ${result.step_description}\n\n**Status:** ${result.status}\n\n**Execution Time:** ${result.execution_time_ms}ms\n\n**Output:**\n\`\`\`\n${result.output}\n\`\`\``,
+      timestamp: new Date().toISOString(),
+      output: result.output,
+      status: result.status
+    };
+    
+    setCells(prev => [...prev, resultCell]);
+  };
+
+  const handleNextStepsGenerated = (nextSteps: ResearchPlanStep[]) => {
+    console.log('🔄 Next steps generated:', nextSteps);
+    
+    // Create new plan with next steps
+    const newPlan: ResearchPlan = {
+      id: `plan_${Date.now()}`,
+      title: 'Next Steps',
+      description: 'Generated based on previous step results',
+      steps: nextSteps,
+      created_at: new Date().toISOString(),
+      status: 'ready'
+    };
+    
+    setResearchPlan(newPlan);
+    
+    // Add next steps notification to cells
+    const nextStepsCell: Cell = {
+      type: 'text',
+      content: `## Next Steps Generated\n\n**${nextSteps.length} new steps** have been generated based on the completed work.\n\nClick "View Plan" to see the new steps and continue execution.`,
+      timestamp: new Date().toISOString()
+    };
+    
+    setCells(prev => [...prev, nextStepsCell]);
+  };
+
   const handleSubmitGoal = async () => {
     if (!currentGoal.trim()) return;
     
@@ -195,31 +293,48 @@ const ResearchSession: React.FC<ResearchSessionProps> = ({
     });
 
     try {
-      const response = await apiService.startResearch({
-        projectId,
-        sessionId,
-        goal: currentGoal.trim(),
-        answers
-      });
-
-      const responseData = response as any;
-      if (responseData.status === 'questions_generated' || responseData.status === 'questions_pending') {
-        // Show message to go to Questions tab
-        setCells([{
-          type: 'text',
-          content: `## Research Setup Required\n\n${responseData.message}\n\nPlease go to the **Questions** tab to answer the clarifying questions before research can begin.`,
-          timestamp: new Date().toISOString()
-        }]);
-      } else if (responseData.cells) {
-        // Research started and cells were generated
-        setCells(responseData.cells);
+      // Check if we have research initialization data and answers
+      if (answers && Object.keys(answers).length > 0) {
+        // We have answers, so generate research plan
+        console.log('📋 Generating research plan with answers...');
         
-        // Start monitoring execution progress
-        setExecutionProgress(prev => ({
-          ...prev,
-          isExecuting: true,
-          totalSteps: responseData.total_steps || 0
-        }));
+        // Get the project to access researchInitialization
+        const project = await apiService.getProject(projectId);
+        if (project && (project as any).researchInitialization) {
+          await generateResearchPlan((project as any).researchInitialization);
+        } else {
+          // Fallback: try to get initialization from API
+          const initialization = await apiService.initializeResearch({ goal: currentGoal.trim() });
+          await generateResearchPlan(initialization);
+        }
+      } else {
+        // No answers yet, start the old research flow
+        const response = await apiService.startResearch({
+          projectId,
+          sessionId,
+          goal: currentGoal.trim(),
+          answers
+        });
+
+        const responseData = response as any;
+        if (responseData.status === 'questions_generated' || responseData.status === 'questions_pending') {
+          // Show message to go to Questions tab
+          setCells([{
+            type: 'text',
+            content: `## Research Setup Required\n\n${responseData.message}\n\nPlease go to the **Questions** tab to answer the clarifying questions before research can begin.`,
+            timestamp: new Date().toISOString()
+          }]);
+        } else if (responseData.cells) {
+          // Research started and cells were generated
+          setCells(responseData.cells);
+          
+          // Start monitoring execution progress
+          setExecutionProgress(prev => ({
+            ...prev,
+            isExecuting: true,
+            totalSteps: responseData.total_steps || 0
+          }));
+        }
       }
     } catch (error) {
       console.error('Failed to start research:', error);
@@ -644,6 +759,40 @@ const ResearchSession: React.FC<ResearchSessionProps> = ({
               </ul>
             </div>
           </div>
+        </div>
+      )}
+
+      {/* Research Plan Toggle */}
+      {researchPlan && (
+        <div className="mb-6 bg-blue-50 border border-blue-200 rounded-lg p-4">
+          <div className="flex items-center justify-between">
+            <div>
+              <h3 className="text-lg font-medium text-blue-900 mb-1">Research Plan Ready</h3>
+              <p className="text-sm text-blue-700">
+                {researchPlan.title} - {researchPlan.steps.length} steps
+              </p>
+            </div>
+            <button
+              onClick={() => setShowResearchPlan(!showResearchPlan)}
+              className="px-4 py-2 bg-blue-500 text-white rounded-md hover:bg-blue-600 transition-colors"
+            >
+              {showResearchPlan ? 'Hide Plan' : 'View Plan'}
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Research Plan Display */}
+      {showResearchPlan && researchPlan && (
+        <div className="mb-6">
+          <ResearchPlanComponent
+            plan={researchPlan}
+            sessionId={sessionId}
+            projectId={projectId}
+            goal={currentGoal}
+            onStepCompleted={handleStepCompleted}
+            onNextStepsGenerated={handleNextStepsGenerated}
+          />
         </div>
       )}
 

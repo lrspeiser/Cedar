@@ -23,7 +23,7 @@ interface ResearchInitialization {
 }
 
 interface ResearchInitializationProps {
-  onComplete: (title: string, goal: string, answers: Record<string, string>, questions: ResearchQuestion[]) => void;
+  onComplete: (title: string, goal: string, answers: Record<string, string>, questions: ResearchQuestion[], initialization: ResearchInitialization) => void;
   onCancel: () => void;
 }
 
@@ -77,7 +77,7 @@ export const ResearchInitialization: React.FC<ResearchInitializationProps> = ({
       return;
     }
 
-    onComplete(initialization.title, goal, answers, initialization.questions);
+    onComplete(initialization.title, goal, answers, initialization.questions, initialization);
   };
 
   const canSubmitAnswers = () => {

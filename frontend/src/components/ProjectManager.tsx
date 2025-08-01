@@ -16,6 +16,7 @@ interface Project {
   questions: any[];
   libraries: any[];
   researchAnswers?: Record<string, string>;
+  researchInitialization?: any;
 }
 
 interface ProjectManagerProps {
@@ -44,7 +45,7 @@ export const ProjectManager: React.FC<ProjectManagerProps> = ({ onProjectSelect,
     }
   };
 
-  const handleResearchComplete = async (title: string, goal: string, answers: Record<string, string>, questions: any[]) => {
+  const handleResearchComplete = async (title: string, goal: string, answers: Record<string, string>, questions: any[], initialization: any) => {
     try {
       setLoading(true);
       
@@ -82,10 +83,11 @@ export const ProjectManager: React.FC<ProjectManagerProps> = ({ onProjectSelect,
       setProjects(prev => [...prev, newProject]);
       setShowResearchInit(false);
       
-      // Store the answers in the project for later use
+      // Store the answers and initialization data in the project for later use
       const projectWithAnswers = {
         ...newProject,
         researchAnswers: answers,
+        researchInitialization: initialization,
         variables: [],
         questions: [],
         libraries: []
