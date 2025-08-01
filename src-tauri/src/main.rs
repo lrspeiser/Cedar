@@ -3683,7 +3683,7 @@ Focus on creating a clear, concise title that immediately conveys what the resea
         request.goal
     );
     
-    let response_json = match cedar::llm::ask_llm(&prompt).await {
+    let response_json = match cedar::llm::ask_llm_for_title(&prompt).await {
         Ok(json_str) => {
             match serde_json::from_str::<serde_json::Value>(&json_str) {
                 Ok(json) => json,

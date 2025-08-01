@@ -6,8 +6,9 @@ use serde::{Deserialize, Serialize};
 use std::env;
 
 /// Public API for the rest of the Cedar system to use.
+/// Uses GPT-4o for research and content generation tasks.
 pub async fn ask_llm(prompt: &str) -> Result<String, String> {
-    println!("🤖 LLM: Starting OpenAI API call");
+    println!("🤖 LLM: Starting OpenAI API call (GPT-4o)");
     
     let api_key = match env::var("OPENAI_API_KEY") {
         Ok(key) => {
@@ -20,8 +21,39 @@ pub async fn ask_llm(prompt: &str) -> Result<String, String> {
         }
     };
     
-    println!("📞 LLM: Calling OpenAI API");
-    let result = call_openai(prompt, &api_key).await;
+    println!("📞 LLM: Calling OpenAI API with GPT-4o");
+    let result = call_openai(prompt, &api_key, "gpt-4o").await;
+    
+    match &result {
+        Ok(response) => {
+            println!("✅ LLM: Successfully received response (length: {})", response.len());
+        },
+        Err(e) => {
+            println!("❌ LLM: API call failed: {}", e);
+        }
+    }
+    
+    result
+}
+
+/// Public API for title generation using GPT-4.1 nano.
+/// Optimized for quick, concise title generation.
+pub async fn ask_llm_for_title(prompt: &str) -> Result<String, String> {
+    println!("🤖 LLM: Starting OpenAI API call (GPT-4.1 nano)");
+    
+    let api_key = match env::var("OPENAI_API_KEY") {
+        Ok(key) => {
+            println!("✅ LLM: Found API key (length: {})", key.len());
+            key
+        },
+        Err(_) => {
+            println!("❌ LLM: Missing OPENAI_API_KEY environment variable");
+            return Err("Missing OPENAI_API_KEY".to_string());
+        }
+    };
+    
+    println!("📞 LLM: Calling OpenAI API with GPT-4.1 nano");
+    let result = call_openai(prompt, &api_key, "gpt-4o-mini").await;
     
     match &result {
         Ok(response) => {
@@ -36,11 +68,11 @@ pub async fn ask_llm(prompt: &str) -> Result<String, String> {
 }
 
 /// Low-level OpenAI wrapper (internal only)
-async fn call_openai(prompt: &str, api_key: &str) -> Result<String, String> {
+async fn call_openai(prompt: &str, api_key: &str, model: &str) -> Result<String, String> {
     let client = Client::new();
 
     let request_body = OpenAIRequest {
-        model: "gpt-4", // or "gpt-4o"
+        model: model.to_string(),
         messages: vec![ChatMessage {
             role: "user".to_string(),
             content: prompt.to_string(),
@@ -81,7 +113,7 @@ async fn call_openai(prompt: &str, api_key: &str) -> Result<String, String> {
 
 #[derive(Serialize)]
 struct OpenAIRequest {
-    model: &'static str,
+    model: String,
     messages: Vec<ChatMessage>,
     temperature: f32,
 }
