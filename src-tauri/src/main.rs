@@ -4,7 +4,7 @@
 #[cfg(test)]
 mod tests;
 
-use tauri::{State, command};
+use tauri::State;
 use serde::{Deserialize, Serialize};
 use serde_json::Value as JsonValue;
 use std::sync::Mutex;
@@ -6274,7 +6274,7 @@ fn main() {
             // analyze_data_file,
             // execute_duckdb_query,
             // list_data_files,
-            call_llm,
+            // call_llm,
             // API Testing endpoints
             test_api_endpoint,
             run_test_suite,

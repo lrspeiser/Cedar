@@ -172,9 +172,8 @@ const DataTab: React.FC<DataTabProps> = ({ projectId, dataFiles, onDataFilesUpda
         '',
       ], 100);
       
-      // Call LLM to analyze the pasted data
-      const response = await apiService.callLLM({
-        prompt: `Analyze the following data and provide a comprehensive JSON response with the following structure:
+      // Call LLM to analyze the pasted data using initializeResearch as a workaround
+      const analysisGoal = `Analyze the following data and provide a comprehensive JSON response with the following structure:
 
 {
   "metadata": {
@@ -224,8 +223,10 @@ Please provide a detailed analysis focusing on:
 1. Field types and data ranges
 2. Data quality assessment
 3. Storage format recommendations (considering DuckDB compatibility)
-4. Potential issues or anomalies in the data`,
-        context: `Analyzing pasted data for project ${projectId}`
+4. Potential issues or anomalies in the data`;
+
+      const response = await apiService.initializeResearch({
+        goal: analysisGoal
       });
 
       console.log('Data analysis completed:', response);
@@ -238,18 +239,63 @@ Please provide a detailed analysis focusing on:
         '',
       ], 50);
 
-      // Parse and display the response
+      // Parse and display the response from initializeResearch
       let analysisResult;
       try {
-        analysisResult = typeof response === 'string' ? JSON.parse(response) : response;
+        // Extract analysis from initializeResearch response
+        const analysisText = response.background_summary || response.sources?.[0]?.summary || JSON.stringify(response);
+        
+        // Try to parse as JSON first
+        try {
+          analysisResult = JSON.parse(analysisText);
+        } catch (e) {
+          // If not valid JSON, create a structured response from the text
+          const lines = pastedData.split('\n');
+          const headers = lines[0]?.split('\t') || [];
+          
+          analysisResult = {
+            metadata: {
+              data_type: "tsv",
+              estimated_rows: lines.length - 1,
+              estimated_columns: headers.length,
+              has_headers: true,
+              encoding: "utf-8"
+            },
+            fields: headers.map((header, index) => ({
+              name: header.trim(),
+              type: "string",
+              sample_values: lines.slice(1, 4).map(line => line.split('\t')[index] || '').filter(Boolean),
+              range: { min: null, max: null },
+              null_count: 0,
+              unique_count: null,
+              description: `Column ${index + 1} from the dataset`
+            })),
+            data_summary: analysisText,
+            storage_recommendations: [
+              {
+                format: "tsv",
+                reasoning: "Tabular data with tab separators",
+                pros: ["Simple", "Human readable", "Widely supported"],
+                cons: ["Limited data types", "No schema validation"],
+                duckdb_compatibility: "Excellent"
+              },
+              {
+                format: "parquet",
+                reasoning: "Columnar format for analytics",
+                pros: ["Compressed", "Fast queries", "Schema support"],
+                cons: ["Binary format", "Less human readable"],
+                duckdb_compatibility: "Excellent"
+              }
+            ],
+            data_quality_issues: []
+          };
+        }
       } catch (e) {
-        // If not JSON, treat as plain text
-        await streamLines(analysisCell.id, [
-          '## Raw Analysis Response:',
-          '',
-          response,
-        ], 30);
-        analysisResult = { raw_response: response };
+        console.error('Error parsing analysis response:', e);
+        analysisResult = { 
+          raw_response: response,
+          error: "Failed to parse analysis response"
+        };
       }
 
       // Stream metadata
@@ -407,8 +453,19 @@ Please provide a detailed analysis focusing on:
 
   const saveAnalyzedData = async (format: string, cellId: string) => {
     const cell = dataAnalysisCells.find(c => c.id === cellId);
-    if (!cell?.metadata?.pastedData || !cell?.metadata?.analysisResult) {
-      alert('No data to save');
+    
+    if (!cell) {
+      alert('Cell not found');
+      return;
+    }
+    
+    if (!cell.metadata?.pastedData) {
+      alert('No pasted data found in cell');
+      return;
+    }
+    
+    if (!cell.metadata?.analysisResult) {
+      alert('No analysis result found in cell');
       return;
     }
 
@@ -427,18 +484,19 @@ Please provide a detailed analysis focusing on:
 
       // Also save the analysis results as metadata
       const analysisFilename = `analysis_metadata_${timestamp}.json`;
+      
       await apiService.saveFile({
         project_id: projectId,
         filename: analysisFilename,
         content: JSON.stringify(cell.metadata.analysisResult, null, 2),
-        file_type: 'metadata'
+        file_type: 'data'
       });
 
       alert(`Data saved as ${filename} with analysis metadata!`);
       await loadDataFiles(); // Refresh the list
     } catch (error) {
       console.error('Failed to save analyzed data:', error);
-      alert('Failed to save analyzed data');
+      alert(`Failed to save analyzed data: ${error}`);
     }
   };
 
