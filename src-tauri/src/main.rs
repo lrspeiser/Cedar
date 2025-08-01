@@ -2529,6 +2529,11 @@ async fn execute_research_steps_background(
                             println!("⚠️ Failed to categorize suggested step output: {}", e);
                         }
                         
+                        // Auto-store any data created by the suggested step
+                        if let Err(e) = auto_store_code_data(step_code, &exec_result.stdout, &project_id, &session_id, &state).await {
+                            println!("⚠️ Failed to auto-store data from suggested step: {}", e);
+                        }
+                        
                         serde_json::json!({
                             "step_number": format!("{}.{}", i, step_idx + 1),
                             "description": format!("Resource preparation: {}", step_code.lines().next().unwrap_or("")),
@@ -2593,6 +2598,11 @@ async fn execute_research_steps_background(
                 // Categorize the output into appropriate tabs
                 if let Err(e) = categorize_code_output(&cell.content, &exec_result.stdout, &project_id, &state).await {
                     println!("⚠️ Failed to categorize code output: {}", e);
+                }
+                
+                // Auto-store any data created by the code
+                if let Err(e) = auto_store_code_data(&cell.content, &exec_result.stdout, &project_id, &session_id, &state).await {
+                    println!("⚠️ Failed to auto-store data: {}", e);
                 }
                 
                 // Create comprehensive execution result
@@ -3390,6 +3400,16 @@ struct InitializeResearchRequest {
     goal: String,
 }
 
+#[derive(Deserialize)]
+struct GenerateTitleRequest {
+    goal: String,
+}
+
+#[derive(Serialize)]
+struct GenerateTitleResponse {
+    title: String,
+}
+
 #[derive(serde::Deserialize, serde::Serialize)]
 struct GenerateResearchPlanRequest {
     goal: String,
@@ -3647,6 +3667,77 @@ Make questions specific to the research goal and focused on determining the tech
 /// 
 /// TESTING: See tests::test_research_initialization() (to be added)
 /// CLI TESTING: Use initialize_research command
+/// Generate Project Title - Quick Title Generation
+/// 
+/// Generates a concise project title (5 words or less) based on the research goal.
+/// This is a fast, focused function for immediate title generation.
+/// 
+/// TESTING: See tests::test_title_generation() (to be added)
+/// CLI TESTING: Use generate_title command
+/// API TESTING: Call generate_title endpoint
+#[tauri::command]
+async fn generate_title(
+    request: GenerateTitleRequest,
+    state: State<'_, AppState>,
+) -> Result<GenerateTitleResponse, String> {
+    println!("📝 Generating title for goal: {}", request.goal);
+    
+    // Check if API key is available
+    let has_api_key = state.api_key.lock().unwrap().is_some();
+    
+    if !has_api_key {
+        println!("❌ No API key available - title generation requires a valid OpenAI API key");
+        return Err("Title generation requires a valid OpenAI API key. Please configure your API key first.".to_string());
+    }
+    
+    // Generate title using LLM
+    let prompt = format!(
+        r#"Based on this research goal: "{}"
+
+Generate a concise, descriptive project title that is 5 words or less.
+
+Requirements:
+- Must be 5 words or less
+- Should be descriptive and specific to the research goal
+- Should be professional and academic in tone
+- Should capture the essence of what will be researched
+
+Return ONLY a JSON object:
+{{
+    "title": "Your Title Here"
+}}
+
+Focus on creating a clear, concise title that immediately conveys what the research is about."#,
+        request.goal
+    );
+    
+    let response_json = match cedar::llm::ask_llm(&prompt).await {
+        Ok(json_str) => {
+            match serde_json::from_str::<serde_json::Value>(&json_str) {
+                Ok(json) => json,
+                Err(e) => {
+                    println!("❌ Failed to parse title JSON: {}", e);
+                    // Fallback response
+                    serde_json::json!({
+                        "title": "Research Project"
+                    })
+                }
+            }
+        },
+        Err(e) => {
+            println!("❌ Failed to generate title: {}", e);
+            return Err(format!("Failed to generate title: {}", e));
+        }
+    };
+    
+    // Parse the response
+    let title = response_json["title"].as_str().unwrap_or("Research Project").to_string();
+    
+    println!("✅ Title generated: {}", title);
+    
+    Ok(GenerateTitleResponse { title })
+}
+
 /// API TESTING: Call initialize_research endpoint
 /// 
 /// Example usage:
@@ -3892,10 +3983,10 @@ Create a practical implementation plan with these requirements:
 2. PLAN DESCRIPTION: Brief overview of the implementation approach
 3. IMPLEMENTATION STEPS: Focused on data analysis and code execution
 
-Each step must include:
+Each step MUST include:
 - Specific, actionable title
 - Clear description of what the code will accomplish
-- Complete, runnable Python code
+- Complete, runnable Python code (REQUIRED - cannot be empty)
 - Expected outputs and deliverables
 
 The plan should:
@@ -3904,6 +3995,8 @@ The plan should:
 - Include concrete code examples
 - Be immediately executable
 - Generate meaningful insights
+
+IMPORTANT: Every step must have actual Python code that can be executed. Do not leave code fields empty.
 
 Return ONLY a JSON object:
 {{
@@ -3915,7 +4008,7 @@ Return ONLY a JSON object:
             "id": "step_1",
             "title": "Data Setup and Loading",
             "description": "Prepare the data environment and load required datasets...",
-            "code": "import pandas as pd\\nprint('Data loaded successfully')",
+            "code": "import pandas as pd\nimport numpy as np\n\n# Load data\ndata = pd.read_csv('data.csv')\nprint('Data loaded successfully')\nprint(f'Shape: {{data.shape}}')",
             "status": "pending",
             "order": 1
         }},
@@ -3923,7 +4016,7 @@ Return ONLY a JSON object:
             "id": "step_2", 
             "title": "Data Analysis",
             "description": "Perform core analysis based on research goal...",
-            "code": "# Analyze data\\nprint('Analysis complete')",
+            "code": "print('Analysis complete')",
             "status": "pending",
             "order": 2
         }}
@@ -3932,7 +4025,7 @@ Return ONLY a JSON object:
     "status": "ready"
 }}
 
-Focus on creating executable code that directly addresses the research goal."#,
+Focus on creating executable code that directly addresses the research goal. Every step must have actual Python code."#,
         request.goal,
         request.sources.len(),
         request.background_summary,
@@ -3965,7 +4058,7 @@ Focus on creating executable code that directly addresses the research goal."#,
                                 "id": "step_2",
                                 "title": "Data Analysis",
                                 "description": "Perform exploratory data analysis.",
-                                "code": "import matplotlib.pyplot as plt\n\n# Analyze data\nprint(data.describe())\nplt.hist(data['column'])\nplt.show()",
+                                "code": "import matplotlib.pyplot as plt\n\n# Analyze data\nprint(data.describe())\nplt.hist(data[\"column\"])\nplt.show()",
                                 "status": "pending",
                                 "order": 2
                             }
@@ -4076,6 +4169,11 @@ async fn execute_step(
     // Auto-install pending libraries
     if let Err(e) = auto_install_pending_libraries(&request.project_id, &state).await {
         println!("⚠️ Failed to auto-install libraries: {}", e);
+    }
+    
+    // Auto-store any data created by the code
+    if let Err(e) = auto_store_code_data(&request.code, &execution_result.stdout, &request.project_id, &request.session_id, &state).await {
+        println!("⚠️ Failed to auto-store data: {}", e);
     }
     
     // Create step result
@@ -5248,6 +5346,7 @@ fn main() {
             start_research,
             execute_code,
             generate_questions,
+            generate_title,
             initialize_research,
             generate_research_plan,
             execute_step,
@@ -5270,4 +5369,189 @@ fn main() {
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
+}
+
+/// Automatically detect and store data created by code execution
+/// This function analyzes code output to identify created data and stores it in our database
+async fn auto_store_code_data(
+    code: &str,
+    output: &str,
+    project_id: &str,
+    session_id: &str,
+    state: &State<'_, AppState>,
+) -> Result<(), String> {
+    println!("🔍 Analyzing code output for data to store...");
+    
+    // Check if output contains data creation indicators
+    let data_indicators = [
+        "DataFrame", "Series", "array", "list", "dict", "DataFrame created",
+        "saved to", "exported", "generated", "created dataset", "table created"
+    ];
+    
+    let has_data = data_indicators.iter().any(|indicator| {
+        output.to_lowercase().contains(&indicator.to_lowercase())
+    });
+    
+    if !has_data {
+        println!("📝 No data creation detected in output");
+        return Ok(());
+    }
+    
+    println!("📊 Data creation detected, analyzing with LLM...");
+    
+    // Create prompt for LLM to analyze and format data
+    let prompt = format!(
+        r#"You are a data storage expert. Analyze the following Python code and its output to identify any data that was created and should be stored in our database.
+
+CODE EXECUTED:
+```python
+{}
+```
+
+OUTPUT:
+```
+{}
+```
+
+DATABASE SCHEMA:
+Our database uses DuckDB with the following structure:
+- Tables are created per dataset with descriptive names
+- Each table has columns with appropriate data types
+- We store metadata about the data (source, description, row count, etc.)
+
+STORAGE REQUIREMENTS:
+1. If data was created, identify the data structure and content
+2. Suggest a descriptive table name (snake_case, no spaces)
+3. Provide the data in a format suitable for database storage
+4. Include metadata about the data (description, source, etc.)
+
+RESPONSE FORMAT:
+Return ONLY a JSON object with this structure:
+{{
+    "data_detected": true/false,
+    "table_name": "descriptive_table_name",
+    "data": [
+        {{"column1": "value1", "column2": "value2"}},
+        {{"column1": "value3", "column2": "value4"}}
+    ],
+    "columns": [
+        {{"name": "column1", "type": "VARCHAR", "description": "Description of column1"}},
+        {{"name": "column2", "type": "INTEGER", "description": "Description of column2"}}
+    ],
+    "metadata": {{
+        "description": "Description of what this data represents",
+        "source": "python_code_execution",
+        "row_count": 123,
+        "created_by": "code_execution"
+    }}
+}}
+
+If no data was created, return:
+{{
+    "data_detected": false,
+    "reason": "Explanation of why no data was detected"
+}}
+
+Focus on identifying actual data structures (DataFrames, arrays, lists, etc.) that were created or modified by the code."#
+    , code, output);
+    
+    // Call LLM to analyze the data
+    let llm_response = match cedar::llm::ask_llm(&prompt).await {
+        Ok(response) => response,
+        Err(e) => {
+            println!("❌ LLM analysis failed: {}", e);
+            return Err(format!("LLM analysis failed: {}", e));
+        }
+    };
+    
+    // Parse LLM response
+    let analysis: serde_json::Value = match serde_json::from_str(&llm_response) {
+        Ok(parsed) => parsed,
+        Err(e) => {
+            println!("❌ Failed to parse LLM response: {}", e);
+            return Err(format!("Failed to parse LLM response: {}", e));
+        }
+    };
+    
+    // Check if data was detected
+    let data_detected = analysis.get("data_detected")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
+    
+    if !data_detected {
+        println!("📝 LLM confirmed no data to store");
+        return Ok(());
+    }
+    
+    // Extract data information
+    let table_name = analysis.get("table_name")
+        .and_then(|v| v.as_str())
+        .ok_or("No table name provided")?;
+    
+    let data = analysis.get("data")
+        .and_then(|v| v.as_array())
+        .ok_or("No data array provided")?;
+    
+    let columns = analysis.get("columns")
+        .and_then(|v| v.as_array())
+        .ok_or("No columns array provided")?;
+    
+    let metadata = analysis.get("metadata")
+        .ok_or("No metadata provided")?;
+    
+    println!("💾 Storing data in table: {}", table_name);
+    
+    // Create DataFileInfo for the generated data
+    let data_file_info = DataFileInfo {
+        id: format!("generated_{}", table_name),
+        name: table_name.to_string(),
+        file_type: "generated".to_string(),
+        size_bytes: serde_json::to_string(&data).unwrap().len() as u64,
+        uploaded_at: chrono::Utc::now().timestamp() as u64,
+        table_name: Some(table_name.to_string()),
+        row_count: Some(data.len() as u64),
+        column_count: Some(columns.len() as u32),
+        columns: Some(columns.iter().map(|col| {
+            ColumnInfo {
+                name: col.get("name").and_then(|v| v.as_str()).unwrap_or("unknown").to_string(),
+                data_type: col.get("type").and_then(|v| v.as_str()).unwrap_or("VARCHAR").to_string(),
+                nullable: true,
+                sample_values: vec![],
+            }
+        }).collect()),
+        sample_data: Some(data.iter().take(5).map(|row| {
+            if let Some(obj) = row.as_object() {
+                obj.values().map(|v| v.to_string()).collect()
+            } else {
+                vec![row.to_string()]
+            }
+        }).collect()),
+        data_summary: metadata.get("description").and_then(|v| v.as_str()).map(|s| s.to_string()),
+        source: "python_created".to_string(),
+    };
+    
+    // Save the data file info
+    storage::save_uploaded_file(
+        &format!("{}.json", table_name),
+        &serde_json::to_string_pretty(&data).unwrap(),
+        "json",
+    ).map_err(|e| format!("Failed to save data file: {}", e))?;
+    
+    // Update project with the new data file
+    {
+        let mut projects = state.projects.lock().unwrap();
+        if let Some(project) = projects.get_mut(project_id) {
+            project.data_files.push(data_file_info.id.clone());
+            save_project(project)?;
+        }
+    }
+    
+    // Create DuckDB table if possible
+    match storage::create_duckdb_table(&data_file_info) {
+        Ok(_) => println!("✅ DuckDB table created successfully"),
+        Err(e) => println!("⚠️ DuckDB table creation failed: {}", e),
+    }
+    
+    println!("✅ Data stored successfully in table: {}", table_name);
+    Ok(())
 }

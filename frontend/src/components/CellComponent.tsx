@@ -23,6 +23,10 @@ interface Cell {
     analysisScript?: string;
     metadata?: any;
     queryResults?: any;
+    threadId?: string; // Added for multi-threading
+    stepId?: string;
+    stepOrder?: number;
+    totalSteps?: number;
   };
   requiresUserAction?: boolean;
   canProceed?: boolean;
@@ -32,23 +36,24 @@ interface CellComponentProps {
   cell: Cell;
   onExecute?: (cell: Cell) => void;
   onQuestionAnswer?: (cellId: string, questionId: string, answer: string) => void;
+  executionThread?: {
+    id: string;
+    status: 'running' | 'completed' | 'error' | 'paused';
+    progress: {
+      currentStep: number;
+      totalSteps: number;
+      stepResults: any[];
+    };
+    error?: string;
+  };
 }
 
-const CellComponent: React.FC<CellComponentProps> = ({ cell, onExecute, onQuestionAnswer }) => {
+const CellComponent: React.FC<CellComponentProps> = ({ cell, onExecute, executionThread }) => {
   const [expanded, setExpanded] = useState(true);
-  const [answers, setAnswers] = useState<Record<string, string>>(cell.metadata?.answers || {});
 
   const handleExecute = () => {
     if (onExecute) {
       onExecute(cell);
-    }
-  };
-
-  const handleQuestionAnswer = (questionId: string, answer: string) => {
-    const newAnswers = { ...answers, [questionId]: answer };
-    setAnswers(newAnswers);
-    if (onQuestionAnswer) {
-      onQuestionAnswer(cell.id, questionId, answer);
     }
   };
 
@@ -250,42 +255,6 @@ const CellComponent: React.FC<CellComponentProps> = ({ cell, onExecute, onQuesti
           </div>
         );
 
-      case 'questions':
-        return (
-          <div className="space-y-4">
-            <div className="bg-orange-50 border border-orange-200 rounded-lg p-4">
-              <h4 className="text-lg font-medium text-orange-900 mb-2">Questions & References</h4>
-              <p className="text-orange-800 mb-4">{cell.content}</p>
-              
-              {cell.metadata?.questions && cell.metadata.questions.length > 0 && (
-                <div className="space-y-4">
-                  {cell.metadata.questions.map((question: any) => (
-                    <div key={question.id} className="bg-white border border-orange-200 rounded p-3">
-                      <label className="block text-sm font-medium text-gray-900 mb-2">
-                        {question.question}
-                        {question.required && <span className="text-red-500 ml-1">*</span>}
-                      </label>
-                      {cell.status === 'completed' ? (
-                        <div className="p-2 bg-green-50 border border-green-200 rounded-md text-green-800">
-                          {answers[question.id] || 'Auto-reviewed'}
-                        </div>
-                      ) : (
-                        <textarea
-                          value={answers[question.id] || ''}
-                          onChange={(e) => handleQuestionAnswer(question.id, e.target.value)}
-                          placeholder="Enter your answer..."
-                          className="w-full p-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-orange-500 focus:border-transparent"
-                          rows={3}
-                        />
-                      )}
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-          </div>
-        );
-
       case 'plan':
         return (
           <div className="space-y-4">
@@ -303,20 +272,31 @@ const CellComponent: React.FC<CellComponentProps> = ({ cell, onExecute, onQuesti
                   <h5 className="font-medium text-gray-900">{cell.metadata.plan.title}</h5>
                   <p className="text-sm text-gray-600 mb-3">{cell.metadata.plan.description}</p>
                   
-                  <div className="space-y-2">
+                  <div className="space-y-4">
                     {cell.metadata.plan.steps.map((step: any, index: number) => (
-                      <div key={step.id} className="flex items-center space-x-2 text-sm">
-                        <span className="w-6 h-6 bg-purple-100 text-purple-600 rounded-full flex items-center justify-center font-medium">
-                          {index + 1}
-                        </span>
-                        <span className="text-gray-900">{step.title}</span>
-                        <span className={`px-2 py-1 rounded text-xs ${
-                          step.status === 'completed' ? 'bg-green-100 text-green-800' :
-                          step.status === 'active' ? 'bg-blue-100 text-blue-800' :
-                          'bg-gray-100 text-gray-600'
-                        }`}>
-                          {step.status}
-                        </span>
+                      <div key={step.id} className="border border-gray-200 rounded p-3">
+                        <div className="flex items-center space-x-2 mb-2">
+                          <span className="w-6 h-6 bg-purple-100 text-purple-600 rounded-full flex items-center justify-center font-medium">
+                            {step.order || index + 1}
+                          </span>
+                          <span className="text-gray-900 font-medium">{step.title}</span>
+                          <span className={`px-2 py-1 rounded text-xs ${
+                            step.status === 'completed' ? 'bg-green-100 text-green-800' :
+                            step.status === 'active' ? 'bg-blue-100 text-blue-800' :
+                            'bg-gray-100 text-gray-600'
+                          }`}>
+                            {step.status}
+                          </span>
+                        </div>
+                        <p className="text-sm text-gray-600 mb-2">{step.description}</p>
+                        {step.code && (
+                          <div>
+                            <h6 className="text-xs font-medium text-gray-700 mb-1">Code:</h6>
+                            <pre className="bg-gray-100 p-2 rounded text-xs overflow-x-auto">
+                              <code>{step.code}</code>
+                            </pre>
+                          </div>
+                        )}
                       </div>
                     ))}
                   </div>
@@ -339,6 +319,44 @@ const CellComponent: React.FC<CellComponentProps> = ({ cell, onExecute, onQuesti
                   <code>{cell.content}</code>
                 </pre>
               </div>
+
+              {/* Execution Thread Status */}
+              {executionThread && (
+                <div className="mb-4">
+                  <div className="flex items-center justify-between mb-2">
+                    <h5 className="text-sm font-medium text-gray-700">Execution Status:</h5>
+                    <span className={`px-2 py-1 rounded text-xs font-medium ${
+                      executionThread.status === 'running' ? 'bg-blue-100 text-blue-800' :
+                      executionThread.status === 'completed' ? 'bg-green-100 text-green-800' :
+                      executionThread.status === 'error' ? 'bg-red-100 text-red-800' :
+                      'bg-yellow-100 text-yellow-800'
+                    }`}>
+                      {executionThread.status.toUpperCase()}
+                    </span>
+                  </div>
+                  
+                  {executionThread.status === 'running' && (
+                    <div className="space-y-2">
+                      <div className="flex justify-between text-sm text-gray-600">
+                        <span>Progress: {executionThread.progress.currentStep} / {executionThread.progress.totalSteps}</span>
+                        <span>{Math.round((executionThread.progress.currentStep / executionThread.progress.totalSteps) * 100)}%</span>
+                      </div>
+                      <div className="w-full bg-gray-200 rounded-full h-2">
+                        <div 
+                          className="bg-blue-600 h-2 rounded-full transition-all duration-300"
+                          style={{ width: `${(executionThread.progress.currentStep / executionThread.progress.totalSteps) * 100}%` }}
+                        ></div>
+                      </div>
+                    </div>
+                  )}
+                  
+                  {executionThread.status === 'error' && executionThread.error && (
+                    <div className="bg-red-50 border border-red-200 rounded p-2 text-sm text-red-800">
+                      <strong>Error:</strong> {executionThread.error}
+                    </div>
+                  )}
+                </div>
+              )}
 
               {/* Output */}
               {cell.output && (
@@ -394,11 +412,23 @@ const CellComponent: React.FC<CellComponentProps> = ({ cell, onExecute, onQuesti
                     {cell.metadata.executionResults.map((result: any, index: number) => (
                       <div key={index} className="bg-white border border-green-200 rounded p-3">
                         <div className="text-sm text-gray-900">
-                          <strong>Step {result.step_number + 1}:</strong> {result.description}
+                          <strong>Step {cell.metadata?.stepOrder ? cell.metadata.stepOrder + 1 : index + 1}:</strong> {result.description || 'Execution completed'}
                         </div>
                         {result.output && (
                           <div className="mt-2 text-xs bg-gray-50 p-2 rounded">
                             <pre className="whitespace-pre-wrap">{result.output}</pre>
+                          </div>
+                        )}
+                        {result.stdout && (
+                          <div className="mt-2 text-xs bg-blue-50 p-2 rounded">
+                            <strong>Output:</strong>
+                            <pre className="whitespace-pre-wrap">{result.stdout}</pre>
+                          </div>
+                        )}
+                        {result.stderr && (
+                          <div className="mt-2 text-xs bg-red-50 p-2 rounded">
+                            <strong>Errors:</strong>
+                            <pre className="whitespace-pre-wrap">{result.stderr}</pre>
                           </div>
                         )}
                       </div>

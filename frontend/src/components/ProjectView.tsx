@@ -107,8 +107,8 @@ const ProjectView: React.FC<ProjectViewProps> = ({ project, onBack }) => {
 
   const generateProjectTitle = async (goal: string): Promise<string> => {
     try {
-      // Use the existing initialize_research command to get a title
-      const response = await apiService.initializeResearch({
+      // Use the new dedicated title generation command
+      const response = await apiService.generateTitle({
         goal: goal
       }) as any;
       return response.title || 'Research Project';

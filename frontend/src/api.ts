@@ -685,6 +685,33 @@ class ApiService {
    * @param request - Research initialization request
    * @returns ResearchInitialization with title and questions
    */
+  async generateTitle(request: { goal: string }) {
+    console.log('📝 Calling Tauri backend: generate_title', request);
+    
+    try {
+      const result = await invoke('generate_title', { request });
+      console.log('✅ Backend title generated successfully');
+      return result;
+    } catch (error) {
+      console.error('❌ Backend error generating title:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Initialize Research - Generate title, sources, background, and questions
+   * 
+   * Generates comprehensive research initialization:
+   * - Project title (5 words or less)
+   * - Top 3 academic research sources with summaries
+   * - Background summary section
+   * - Research direction questions
+   * 
+   * TESTING: Use in browser console with test-research-initialization.js
+   * 
+   * @param request - Research initialization request
+   * @returns ResearchInitialization with title and questions
+   */
   async initializeResearch(request: { goal: string }) {
     console.log('🔧 Calling Tauri backend: initialize_research', request);
     

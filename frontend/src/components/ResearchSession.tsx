@@ -89,6 +89,7 @@ interface Cell {
     analysisScript?: string;
     metadata?: any;
     queryResults?: any;
+    threadId?: string; // Added for multi-threading
   };
   requiresUserAction?: boolean;
   canProceed?: boolean;
@@ -123,6 +124,20 @@ interface DataRouterResult {
     libraries?: number;
     writeUps?: number;
   };
+}
+
+interface ExecutionThread {
+  id: string;
+  cellId: string;
+  status: 'running' | 'completed' | 'error' | 'paused';
+  startTime: string;
+  endTime?: string;
+  progress: {
+    currentStep: number;
+    totalSteps: number;
+    stepResults: any[];
+  };
+  error?: string;
 }
 
 interface ResearchSessionProps {
@@ -386,11 +401,15 @@ const ResearchSession: React.FC<ResearchSessionProps> = ({
   onDataRouted
 }) => {
   const [cells, setCells] = useState<Cell[]>([]);
-  const [currentGoal, setCurrentGoal] = useState(goal);
   const [isLoading, setIsLoading] = useState(false);
   const [researchPlan, setResearchPlan] = useState<ResearchPlan | null>(null);
   const [dataRouter] = useState(() => new DataRouterService(projectId));
-  const [routingStatus, setRoutingStatus] = useState<DataRouterResult | null>(null);
+  
+  // Multi-threaded execution system
+  const [executionThreads, setExecutionThreads] = useState<Map<string, ExecutionThread>>(new Map());
+  const [activeThreadId, setActiveThreadId] = useState<string | null>(null);
+  
+  // Legacy execution progress (for backward compatibility)
   const [executionProgress, setExecutionProgress] = useState<{
     currentStep: number;
     totalSteps: number;
@@ -439,6 +458,24 @@ const ResearchSession: React.FC<ResearchSessionProps> = ({
     }
   }, [sessionId]);
 
+  // Persist execution threads when component unmounts or session changes
+  useEffect(() => {
+    const saveThreads = async () => {
+      if (sessionId && executionThreads.size > 0) {
+        try {
+          const threadsData = Array.from(executionThreads.entries());
+          await apiService.saveSession(`${sessionId}_threads`, { threads: threadsData });
+        } catch (error) {
+          console.error('Failed to save execution threads:', error);
+        }
+      }
+    };
+
+    return () => {
+      saveThreads();
+    };
+  }, [sessionId, executionThreads]);
+
   const loadSession = async () => {
     try {
       const session = await apiService.loadSession(sessionId) as any;
@@ -454,6 +491,28 @@ const ResearchSession: React.FC<ResearchSessionProps> = ({
         if (session.researchPlan) {
           setResearchPlan(session.researchPlan);
         }
+      }
+
+      // Load execution threads
+      try {
+        const threadsSession = await apiService.loadSession(`${sessionId}_threads`) as any;
+        if (threadsSession && threadsSession.threads) {
+          const threadsMap = new Map<string, ExecutionThread>();
+          for (const [threadId, threadData] of threadsSession.threads) {
+            threadsMap.set(threadId as string, threadData as ExecutionThread);
+          }
+          setExecutionThreads(threadsMap);
+          
+          // Find active thread
+          for (const [threadId, thread] of threadsMap) {
+            if (thread.status === 'running') {
+              setActiveThreadId(threadId);
+              break;
+            }
+          }
+        }
+      } catch (error) {
+        console.log('No existing execution threads found');
       }
     } catch (error) {
       console.error('Failed to load session:', error);
@@ -474,11 +533,87 @@ const ResearchSession: React.FC<ResearchSessionProps> = ({
     }
   };
 
+  // Create a new execution thread
+  const createExecutionThread = (cellId: string, totalSteps: number): string => {
+    const threadId = `thread_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+    const thread: ExecutionThread = {
+      id: threadId,
+      cellId,
+      status: 'running',
+      startTime: new Date().toISOString(),
+      progress: {
+        currentStep: 0,
+        totalSteps,
+        stepResults: [],
+      },
+    };
+    
+    setExecutionThreads(prev => new Map(prev).set(threadId, thread));
+    setActiveThreadId(threadId);
+    return threadId;
+  };
+
+  // Update execution thread progress
+  const updateExecutionThread = (threadId: string, updates: Partial<ExecutionThread>) => {
+    setExecutionThreads(prev => {
+      const newMap = new Map(prev);
+      const thread = newMap.get(threadId);
+      if (thread) {
+        newMap.set(threadId, { ...thread, ...updates });
+      }
+      return newMap;
+    });
+  };
+
+  // Complete an execution thread
+  const completeExecutionThread = (threadId: string, results: any[], error?: string) => {
+    setExecutionThreads(prev => {
+      const newMap = new Map(prev);
+      const thread = newMap.get(threadId);
+      if (thread) {
+        newMap.set(threadId, {
+          ...thread,
+          status: error ? 'error' : 'completed',
+          endTime: new Date().toISOString(),
+          progress: {
+            ...thread.progress,
+            stepResults: results,
+          },
+          error,
+        });
+      }
+      return newMap;
+    });
+    
+    if (activeThreadId === threadId) {
+      setActiveThreadId(null);
+    }
+  };
+
+  // Get execution status for a cell
+  const getCellExecutionStatus = (cellId: string): ExecutionThread | null => {
+    for (const [_, thread] of executionThreads) {
+      if (thread.cellId === cellId) {
+        return thread;
+      }
+    }
+    return null;
+  };
+
+  // Check if any threads are currently running
+  const hasRunningThreads = (): boolean => {
+    for (const [_, thread] of executionThreads) {
+      if (thread.status === 'running') {
+        return true;
+      }
+    }
+    return false;
+  };
+
   // Route data from a cell to appropriate tabs
   const routeCellData = async (cell: Cell): Promise<void> => {
     try {
       const result = await dataRouter.routeCellData(cell);
-      setRoutingStatus(result);
       
       if (onDataRouted) {
         onDataRouted(result);
@@ -510,18 +645,15 @@ const ResearchSession: React.FC<ResearchSessionProps> = ({
           break;
           
         case 'initialization':
-          // Generate questions cell
-          nextCell = await generateQuestionsCell(currentCell.metadata?.references || []);
-          break;
-          
-        case 'questions':
-          // Generate research plan
-          nextCell = await generatePlanCell(currentCell.metadata?.answers || {});
+          // Skip questions, go directly to plan
+          nextCell = await generatePlanCell({});
           break;
           
         case 'plan':
-          // Start execution
-          nextCell = await generateFirstExecutionCell(currentCell.metadata?.plan);
+          // Generate first execution cell
+          if (currentCell.metadata?.plan) {
+            nextCell = await generateFirstExecutionCell(currentCell.metadata.plan);
+          }
           break;
           
         case 'code':
@@ -530,9 +662,12 @@ const ResearchSession: React.FC<ResearchSessionProps> = ({
           break;
           
         case 'result':
-          // Generate next code step or final writeup
+          // Generate next step or writeup
           nextCell = await generateNextStepOrWriteup(currentCell);
           break;
+          
+        default:
+          console.log('Unknown cell type:', currentCell.type);
       }
       
       if (nextCell) {
@@ -540,26 +675,14 @@ const ResearchSession: React.FC<ResearchSessionProps> = ({
         setCells(updatedCells);
         await saveSession(updatedCells);
         
-        // If this is a code cell, start execution
+        // If next cell is code, start execution
         if (nextCell.type === 'code') {
-          await executeCodeStep(nextCell);
+          setTimeout(() => executeCodeStep(nextCell), 100);
         }
       }
+      
     } catch (error) {
       console.error('Error in handleNextStep:', error);
-      // Add error cell
-      const errorCell: Cell = {
-        id: `error-${Date.now()}`,
-        type: 'result',
-        content: `Error: ${error instanceof Error ? error.message : 'Unknown error'}`,
-        timestamp: new Date().toISOString(),
-        status: 'error',
-        requiresUserAction: false,
-        canProceed: false,
-      };
-      const updatedCells = [...cells, errorCell];
-      setCells(updatedCells);
-      await saveSession(updatedCells);
     } finally {
       setIsLoading(false);
     }
@@ -583,39 +706,9 @@ const ResearchSession: React.FC<ResearchSessionProps> = ({
     };
   };
 
-  const generateQuestionsCell = async (references: any[]): Promise<Cell> => {
-    const questions = references.length > 0 ? 
-      references.map(ref => ({
-        id: `ref-${ref.title}`,
-        question: `Review reference: ${ref.title} by ${ref.authors}`,
-        category: 'reference',
-        required: false,
-      })) : [];
-    
-    // Auto-answer all reference questions as "reviewed"
-    const autoAnswers = questions.reduce((acc, question) => {
-      acc[question.id] = 'Reference reviewed and ready for research';
-      return acc;
-    }, {} as Record<string, string>);
-    
-    return {
-      id: `questions-${Date.now()}`,
-      type: 'questions',
-      content: `References reviewed (${references.length} sources found):\n\n${references.map(ref => `• ${ref.title} by ${ref.authors}`).join('\n')}`,
-      timestamp: new Date().toISOString(),
-      status: 'completed',
-      requiresUserAction: false,
-      canProceed: true,
-      metadata: {
-        questions,
-        answers: autoAnswers,
-      },
-    };
-  };
-
   const generatePlanCell = async (answers: Record<string, string>): Promise<Cell> => {
     const plan = await apiService.generateResearchPlan({
-      goal: currentGoal,
+      goal: goal, // Use the current goal from props
       answers,
       sources: [],
       background_summary: '',
@@ -660,7 +753,116 @@ const ResearchSession: React.FC<ResearchSessionProps> = ({
     };
   };
 
+  const executeCodeStep = async (codeCell: Cell) => {
+    // Check if this cell already has an execution thread
+    const existingThread = getCellExecutionStatus(codeCell.id);
+    if (existingThread && existingThread.status === 'running') {
+      console.log('Execution already running for this cell');
+      return;
+    }
+
+    // Create new execution thread
+    const totalSteps = codeCell.metadata?.totalSteps || 1;
+    const threadId = createExecutionThread(codeCell.id, totalSteps);
+
+    try {
+      // Update cell status to active
+      const updatedCells = cells.map(cell => 
+        cell.id === codeCell.id 
+          ? { ...cell, status: 'active' as const }
+          : cell
+      );
+      setCells(updatedCells);
+      await saveSession(updatedCells);
+
+      // Execute the code
+      const result = await apiService.executeCode({
+        code: codeCell.content,
+        sessionId,
+      });
+
+      // Update thread progress
+      updateExecutionThread(threadId, {
+        progress: {
+          currentStep: 1,
+          totalSteps,
+          stepResults: [result],
+        },
+      });
+
+      // Generate result cell
+      const resultCell: Cell = {
+        id: `result-${Date.now()}`,
+        type: 'result',
+        content: `Execution completed for step ${(codeCell.metadata?.stepOrder || 0) + 1}`,
+        timestamp: new Date().toISOString(),
+        status: 'completed',
+        requiresUserAction: false,
+        canProceed: true,
+        metadata: {
+          executionResults: [result],
+          stepOrder: codeCell.metadata?.stepOrder || 0,
+          totalSteps: codeCell.metadata?.totalSteps || 0,
+          threadId, // Store thread ID for reference
+        },
+      };
+
+      // Update original cell status
+      const finalCells = updatedCells.map(cell => 
+        cell.id === codeCell.id 
+          ? { ...cell, status: 'completed' as const }
+          : cell
+      );
+
+      // Add result cell
+      const cellsWithResult = [...finalCells, resultCell];
+      setCells(cellsWithResult);
+      await saveSession(cellsWithResult);
+
+      // Complete the execution thread
+      completeExecutionThread(threadId, [result]);
+
+      // Route data from result cell
+      await routeCellData(resultCell);
+
+      // Generate next step or writeup
+      const nextCell = await generateNextStepOrWriteup(resultCell);
+      if (nextCell) {
+        const cellsWithNext = [...cellsWithResult, nextCell];
+        setCells(cellsWithNext);
+        await saveSession(cellsWithNext);
+
+        // If next cell is code, start execution in a new thread
+        if (nextCell.type === 'code') {
+          // Small delay to allow UI to update
+          setTimeout(() => {
+            executeCodeStep(nextCell);
+          }, 100);
+        }
+      }
+
+    } catch (error) {
+      console.error('Failed to execute code:', error);
+      
+      // Update cell status to error
+      const updatedCells = cells.map(cell => 
+        cell.id === codeCell.id 
+          ? { ...cell, status: 'error' as const }
+          : cell
+      );
+      setCells(updatedCells);
+      await saveSession(updatedCells);
+
+      // Complete thread with error
+      completeExecutionThread(threadId, [], error instanceof Error ? error.message : 'Unknown error');
+    }
+  };
+
   const executeCodeAndGenerateResult = async (codeCell: Cell): Promise<Cell> => {
+    // Create execution thread for this cell
+    const totalSteps = codeCell.metadata?.totalSteps || 1;
+    const threadId = createExecutionThread(codeCell.id, totalSteps);
+
     // Execute the code
     const result = await apiService.executeCode({
       code: codeCell.content,
@@ -668,20 +870,25 @@ const ResearchSession: React.FC<ResearchSessionProps> = ({
     });
     
     // Generate result cell
+    const stepNumber = (codeCell.metadata?.stepOrder || 0) + 1;
     const resultCell: Cell = {
       id: `result-${Date.now()}`,
       type: 'result',
-      content: `Execution completed for step ${(codeCell.metadata?.stepOrder || 0) + 1}`,
+      content: `Execution completed for step ${stepNumber}`,
       timestamp: new Date().toISOString(),
       status: 'completed',
       requiresUserAction: false,
       canProceed: true,
       metadata: {
         executionResults: [result],
-        stepOrder: codeCell.metadata?.stepOrder,
-        totalSteps: codeCell.metadata?.totalSteps,
+        stepOrder: codeCell.metadata?.stepOrder || 0,
+        totalSteps: codeCell.metadata?.totalSteps || 0,
+        threadId, // Store thread ID for reference
       },
     };
+
+    // Complete the execution thread
+    completeExecutionThread(threadId, [result]);
     
     return resultCell;
   };
@@ -725,233 +932,67 @@ const ResearchSession: React.FC<ResearchSessionProps> = ({
     return null;
   };
 
-  const executeCodeStep = async (codeCell: Cell) => {
-    try {
-      const result = await apiService.executeCode({
-        code: codeCell.content,
-        sessionId,
-      });
-      
-      // Update the code cell with results
-      const updatedCells = cells.map(cell => 
-        cell.id === codeCell.id 
-          ? { ...cell, status: 'completed' as const, output: JSON.stringify(result, null, 2) }
-          : cell
-      );
-      
-      setCells(updatedCells);
-      await saveSession(updatedCells);
-      
-      // Auto-generate next step
-      setTimeout(() => handleNextStep(codeCell), 1000);
-    } catch (error) {
-      console.error('Error executing code:', error);
-      const updatedCells = cells.map(cell => 
-        cell.id === codeCell.id 
-          ? { ...cell, status: 'error' as const, output: error instanceof Error ? error.message : 'Unknown error' }
-          : cell
-      );
-      setCells(updatedCells);
-      await saveSession(updatedCells);
-    }
-  };
-
-  const handleQuestionAnswer = (cellId: string, questionId: string, answer: string) => {
-    const updatedCells = cells.map(cell => {
-      if (cell.id === cellId) {
-        const updatedAnswers = { ...cell.metadata?.answers, [questionId]: answer };
-        const allQuestions = cell.metadata?.questions || [];
-        const requiredQuestions = allQuestions.filter((q: any) => q.required);
-        const canProceed = requiredQuestions.every((q: any) => updatedAnswers[q.id]);
-        
-        return {
-          ...cell,
-          metadata: {
-            ...cell.metadata,
-            answers: updatedAnswers,
-          },
-          canProceed,
-        };
-      }
-      return cell;
-    });
-    
-    setCells(updatedCells);
-    saveSession(updatedCells);
-  };
-
-  const handleSubmitGoal = async () => {
-    if (!currentGoal.trim()) return;
-    
-    const goalCell: Cell = {
-      id: `goal-${Date.now()}`,
-      type: 'goal',
-      content: currentGoal,
-      timestamp: new Date().toISOString(),
-      status: 'completed',
-      requiresUserAction: false,
-      canProceed: true,
-    };
-    
-    const updatedCells = [...cells, goalCell];
-    setCells(updatedCells);
-    await saveSession(updatedCells);
-    
-    // Start the research workflow
-    await handleNextStep(goalCell);
-  };
-
-  const renderCell = (cell: Cell, index: number) => {
-    const isLastCell = index === cells.length - 1;
+  const renderCell = (cell: Cell) => {
+    // Get execution thread for this cell
+    const executionThread = getCellExecutionStatus(cell.id);
     
     return (
-      <div key={cell.id} className="mb-6">
-        <CellComponent
-          cell={cell}
-          onExecute={executeCodeStep}
-          onQuestionAnswer={handleQuestionAnswer}
-        />
-        
-        {isLastCell && cell.canProceed && (
-          <div className="mt-4 flex justify-end">
-            <button
-              onClick={() => handleNextStep(cell)}
-              disabled={isLoading}
-              className="px-6 py-2 bg-cedar-500 text-white rounded-md hover:bg-cedar-600 disabled:opacity-50 disabled:cursor-not-allowed flex items-center space-x-2"
-            >
-              {isLoading ? (
-                <>
-                  <span className="animate-spin">⏳</span>
-                  <span>Processing...</span>
-                </>
-              ) : (
-                <>
-                  <span>→</span>
-                  <span>Next</span>
-                </>
-              )}
-            </button>
-          </div>
-        )}
-      </div>
+      <CellComponent
+        key={cell.id}
+        cell={cell}
+        executionThread={executionThread || undefined}
+        onExecute={cell.type === 'code' ? () => executeCodeStep(cell) : undefined}
+      />
     );
   };
 
   return (
-    <div className="h-full flex flex-col bg-white">
-      {/* Header */}
-      <div className="flex-shrink-0 p-6 border-b border-gray-200">
+    <div className="h-full flex flex-col">
+      {/* Header with execution status */}
+      <div className="bg-white border-b border-gray-200 p-4">
         <div className="flex items-center justify-between">
           <div>
             <h2 className="text-xl font-semibold text-gray-900">Research Notebook</h2>
-            <p className="text-sm text-gray-600">Interactive research workflow with automatic data routing</p>
+            <p className="text-sm text-gray-600">Session: {sessionId}</p>
           </div>
           
-          {cells.length === 0 && (
-            <div className="flex items-center space-x-4">
-              <input
-                type="text"
-                value={currentGoal}
-                onChange={(e) => setCurrentGoal(e.target.value)}
-                placeholder="Enter your research goal..."
-                className="px-4 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-cedar-500 focus:border-transparent"
-              />
-              <button
-                onClick={handleSubmitGoal}
-                disabled={!currentGoal.trim() || isLoading}
-                className="px-4 py-2 bg-cedar-500 text-white rounded-md hover:bg-cedar-600 disabled:opacity-50 disabled:cursor-not-allowed"
-              >
-                Start Research
-              </button>
-            </div>
-          )}
-        </div>
-      </div>
-
-      {/* Data Routing Status */}
-      {routingStatus && (
-        <div className={`flex-shrink-0 p-3 border-b ${
-          routingStatus.success ? 'bg-green-50 border-green-200' : 'bg-red-50 border-red-200'
-        }`}>
-          <div className="flex items-center justify-between text-sm">
-            <span className={routingStatus.success ? 'text-green-800' : 'text-red-800'}>
-              {routingStatus.message}
-            </span>
-            {routingStatus.success && routingStatus.routedItems && (
-              <div className="flex items-center space-x-4 text-xs text-green-600">
-                {routingStatus.routedItems.references && (
-                  <span>📚 {routingStatus.routedItems.references} references</span>
-                )}
-                {routingStatus.routedItems.dataFiles && (
-                  <span>📊 {routingStatus.routedItems.dataFiles} data files</span>
-                )}
-                {routingStatus.routedItems.visualizations && (
-                  <span>📈 {routingStatus.routedItems.visualizations} visualizations</span>
-                )}
-                {routingStatus.routedItems.variables && (
-                  <span>🔧 {routingStatus.routedItems.variables} variables</span>
-                )}
-                {routingStatus.routedItems.libraries && (
-                  <span>📦 {routingStatus.routedItems.libraries} libraries</span>
-                )}
-                {routingStatus.routedItems.writeUps && (
-                  <span>✍️ {routingStatus.routedItems.writeUps} write-ups</span>
-                )}
+          {/* Execution Threads Status */}
+          <div className="flex items-center space-x-4">
+            {hasRunningThreads() && (
+              <div className="flex items-center space-x-2 bg-blue-50 border border-blue-200 rounded-lg px-3 py-2">
+                <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-blue-500"></div>
+                <span className="text-sm font-medium text-blue-800">
+                  {Array.from(executionThreads.values()).filter(t => t.status === 'running').length} thread(s) running
+                </span>
+              </div>
+            )}
+            
+            {executionThreads.size > 0 && (
+              <div className="text-sm text-gray-600">
+                Total threads: {executionThreads.size}
               </div>
             )}
           </div>
         </div>
-      )}
+      </div>
 
       {/* Notebook Content */}
-      <div className="flex-1 overflow-y-auto p-6">
+      <div className="flex-1 overflow-y-auto p-4 space-y-4">
         {cells.length === 0 ? (
-          <div className="text-center py-12">
-            <div className="text-6xl mb-4">🔬</div>
-            <h3 className="text-xl font-semibold text-gray-900 mb-2">Start Your Research</h3>
-            <p className="text-gray-600 mb-6">
-              Enter your research goal above to begin the interactive research process.
-            </p>
-            <div className="max-w-md mx-auto text-left text-sm text-gray-500 space-y-2">
-              <div className="flex items-center space-x-2">
-                <span className="w-2 h-2 bg-cedar-500 rounded-full"></span>
-                <span>AI will generate research initialization</span>
-              </div>
-              <div className="flex items-center space-x-2">
-                <span className="w-2 h-2 bg-cedar-500 rounded-full"></span>
-                <span>Review references and answer questions</span>
-              </div>
-              <div className="flex items-center space-x-2">
-                <span className="w-2 h-2 bg-cedar-500 rounded-full"></span>
-                <span>Execute research steps with code</span>
-              </div>
-              <div className="flex items-center space-x-2">
-                <span className="w-2 h-2 bg-cedar-500 rounded-full"></span>
-                <span>Generate visualizations and write-up</span>
-              </div>
-              <div className="flex items-center space-x-2">
-                <span className="w-2 h-2 bg-cedar-500 rounded-full"></span>
-                <span>Data automatically routed to appropriate tabs</span>
-              </div>
-            </div>
+          <div className="text-center py-8">
+            <p className="text-gray-500">No research session started yet.</p>
           </div>
         ) : (
-          <div className="space-y-6">
-            {cells.map((cell, index) => renderCell(cell, index))}
+          cells.map((cell) => renderCell(cell))
+        )}
+        
+        {isLoading && (
+          <div className="flex items-center justify-center py-4">
+            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-500"></div>
+            <span className="ml-2 text-gray-600">Processing...</span>
           </div>
         )}
       </div>
-
-      {/* Progress Indicator */}
-      {cells.length > 0 && (
-        <div className="flex-shrink-0 p-4 border-t border-gray-200 bg-gray-50">
-          <div className="flex items-center justify-between text-sm text-gray-600">
-            <span>Cells: {cells.length}</span>
-            <span>Session: {sessionId}</span>
-            {isLoading && <span className="flex items-center space-x-2"><span className="animate-spin">⏳</span> Processing...</span>}
-          </div>
-        </div>
-      )}
     </div>
   );
 };
