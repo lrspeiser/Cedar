@@ -2341,55 +2341,26 @@ async fn start_research(
         return Err("Research requires a valid OpenAI API key. Please configure your API key first.".to_string());
     }
     
-    // Use the real research functionality from cedar-core
-    let mut context = cedar::context::NotebookContext::new();
+    // Create initial session with just the goal cell
+    // The ResearchSession component will handle the rest of the flow
+    let goal_cell = serde_json::json!({
+        "id": "goal-1",
+        "type": "goal",
+        "content": request.goal,
+        "timestamp": chrono::Utc::now().to_rfc3339(),
+        "status": "completed",
+        "requiresUserAction": false,
+        "canProceed": true
+    });
     
-    // Enhance the goal with research initialization answers if provided
-    let enhanced_goal = if let Some(answers) = &request.answers {
-        let answers_str = serde_json::to_string_pretty(answers)
-            .unwrap_or_else(|_| "{}".to_string());
-        format!(
-            "Research Goal: {}\n\nAdditional Context from User Answers:\n{}",
-            request.goal,
-            answers_str
-        )
-    } else {
-        request.goal.clone()
-    };
-    
-    // Generate research plan using the actual agent with enhanced goal
-    let plan_cells = match cedar::agent::generate_plan_from_goal(&enhanced_goal, &mut context).await {
-        Ok(cells) => cells,
-        Err(e) => {
-            println!("❌ Failed to generate research plan: {}", e);
-            return Err(format!("Failed to generate research plan: {}", e));
-        }
-    };
-    
-    // Convert cells to JSON for frontend
-    let cells_json: Vec<serde_json::Value> = plan_cells.iter().map(|cell| {
-        serde_json::json!({
-            "id": cell.id,
-            "cell_type": format!("{:?}", cell.cell_type),
-            "content": cell.content,
-            "origin": format!("{:?}", cell.origin),
-            "execution_result": cell.execution_result,
-            "metadata": cell.metadata
-        })
-    }).collect();
-    
-    // Save the research plan to the session
+    // Save the initial session to memory and disk
     {
         let mut sessions = state.sessions.lock().unwrap();
         let session_data = serde_json::json!({
             "project_id": request.project_id,
             "goal": request.goal,
-            "plan_cells": cells_json,
-            "context": {
-                "variables": context.variables,
-                "glossary": context.glossary
-            },
-            "status": "plan_generated",
+            "cells": [goal_cell],
+            "status": "active",
             "created_at": chrono::Utc::now().to_rfc3339(),
             "execution_results": []
         });
@@ -2406,7 +2377,7 @@ async fn start_research(
         let mut projects = state.projects.lock().unwrap();
         if let Some(project) = projects.get_mut(&request.project_id) {
             project.session_id = Some(request.session_id.clone());
-            project.session_status = Some("plan_generated".to_string());
+            project.session_status = Some("active".to_string());
             project.updated_at = chrono::Utc::now().to_rfc3339();
             
             // Save updated project to disk
@@ -2416,27 +2387,15 @@ async fn start_research(
         }
     }
     
-    // Start executing the research steps automatically in the background
-    let session_id = request.session_id.clone();
-    let project_id = request.project_id.clone();
+    println!("✅ Research session started successfully");
     
-    // For now, we'll execute the research steps synchronously
-    // TODO: Implement proper background execution with state management
-    println!("🚀 Starting research execution (synchronous mode)");
-    if let Err(e) = execute_research_steps_background(session_id, project_id, plan_cells, state).await {
-        println!("❌ Failed to execute research steps: {}", e);
-    }
-    
-    let response = serde_json::json!({
-        "status": "plan_generated",
+    // Return the session data for the frontend
+    Ok(serde_json::json!({
         "session_id": request.session_id,
-        "message": "Research plan generated successfully. Executing steps automatically...",
-        "plan_cells": cells_json,
-        "total_steps": cells_json.len()
-    });
-    
-    println!("✅ Research plan generated with {} steps, starting execution", cells_json.len());
-    Ok(response)
+        "project_id": request.project_id,
+        "status": "active",
+        "cells": [goal_cell]
+    }))
 }
 
 /// Execute Research Steps - Background Execution
