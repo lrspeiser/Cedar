@@ -514,7 +514,34 @@ const ResearchSession: React.FC<ResearchSessionProps> = ({
     try {
       const session = await apiService.loadSession(sessionId) as any;
       if (session && session.cells) {
-        setCells(session.cells);
+        // Reset any stuck cells (active or pending status that shouldn't be)
+        const cleanedCells = session.cells.map((cell: Cell) => {
+          // If a cell has been in active/pending status for more than 5 minutes, reset it
+          const cellTime = new Date(cell.timestamp).getTime();
+          const now = Date.now();
+          const timeDiff = now - cellTime;
+          
+          if ((cell.status === 'active' || cell.status === 'pending') && timeDiff > 5 * 60 * 1000) {
+            console.log(`Resetting stuck cell ${cell.id} from ${cell.status} to completed`);
+            return {
+              ...cell,
+              status: 'completed' as const,
+              timestamp: new Date().toISOString()
+            };
+          }
+          
+          // Ensure goal cells can proceed to next step
+          if (cell.type === 'goal' && cell.status === 'completed') {
+            return {
+              ...cell,
+              canProceed: true
+            };
+          }
+          
+          return cell;
+        });
+        
+        setCells(cleanedCells);
         
         // Update execution progress if available
         if (session.executionProgress) {
@@ -731,6 +758,83 @@ const ResearchSession: React.FC<ResearchSessionProps> = ({
       console.error('Error in handleNextStep:', error);
       // Show error to user
       alert(`Error processing next step: ${error}`);
+    } finally {
+      clearTimeout(timeoutId);
+      setIsLoading(false);
+    }
+  };
+
+  const handleSubmitComment = async (currentCell: Cell, comment: string) => {
+    // Prevent multiple simultaneous executions
+    if (isLoading) {
+      console.log('Already processing, please wait...');
+      return;
+    }
+    
+    setIsLoading(true);
+    
+    // Set a timeout to prevent infinite loading
+    const timeoutId = setTimeout(() => {
+      console.warn('Processing timeout - resetting loading state');
+      setIsLoading(false);
+    }, 30000); // 30 second timeout
+    
+    try {
+      console.log(`Rerunning ${currentCell.type} cell with comment: ${comment}`);
+      
+      let updatedCell: Cell | null = null;
+      
+      switch (currentCell.type) {
+        case 'goal':
+          // Regenerate research initialization with comment
+          updatedCell = await generateInitializationCellWithComment(currentCell.content, comment);
+          break;
+          
+        case 'initialization':
+          // Regenerate initialization with comment
+          updatedCell = await generateInitializationCellWithComment(currentCell.content, comment);
+          break;
+          
+        case 'plan':
+          // Regenerate plan with comment
+          updatedCell = await generatePlanCellWithComment({}, comment);
+          break;
+          
+        case 'code':
+          // Regenerate code with comment
+          updatedCell = await executeCodeWithComment(currentCell, comment);
+          break;
+          
+        case 'result':
+          // Regenerate result with comment
+          updatedCell = await generateNextStepOrWriteupWithComment(currentCell, comment);
+          break;
+          
+        default:
+          console.log('Unknown cell type for comment:', currentCell.type);
+          alert('Comment functionality not available for this cell type.');
+          return;
+      }
+      
+      if (updatedCell) {
+        // Replace the current cell with the updated one
+        const cellIndex = cells.findIndex(c => c.id === currentCell.id);
+        if (cellIndex !== -1) {
+          const updatedCells = [...cells];
+          updatedCells[cellIndex] = updatedCell;
+          setCells(updatedCells);
+          await saveSession(updatedCells);
+          
+          // If updated cell is code, start execution
+          if (updatedCell.type === 'code') {
+            setTimeout(() => executeCodeStep(updatedCell), 100);
+          }
+        }
+      }
+      
+    } catch (error) {
+      console.error('Error in handleSubmitComment:', error);
+      alert(`Error processing comment: ${error}`);
     } finally {
       clearTimeout(timeoutId);
       setIsLoading(false);
@@ -1033,6 +1137,174 @@ const ResearchSession: React.FC<ResearchSessionProps> = ({
     return null;
   };
 
+  // Comment-aware functions
+  const generateInitializationCellWithComment = async (goal: string, comment: string): Promise<Cell> => {
+    const enhancedGoal = `${goal}\n\nUser Comment: ${comment}\n\nPlease consider this feedback when generating the research initialization.`;
+    const initialization = await apiService.initializeResearch({ goal: enhancedGoal }) as any;
+    
+    // Store the background summary as an abstract in the write-up tab
+    if (initialization.background_summary) {
+      try {
+        await dataRouter.routeWriteUp(`# Abstract (Updated)\n\n${initialization.background_summary}`);
+        console.log('✅ Updated abstract stored in write-up tab');
+      } catch (error) {
+        console.error('Failed to store updated abstract:', error);
+      }
+    }
+    
+    return {
+      id: `initialization-${Date.now()}`,
+      type: 'initialization',
+      content: `Research Initialization (Updated) for: ${goal}\n\nUser Feedback: ${comment}\n\n${initialization.background_summary}`,
+      timestamp: new Date().toISOString(),
+      status: 'completed',
+      requiresUserAction: false,
+      canProceed: true,
+      metadata: {
+        references: initialization.sources,
+        questions: initialization.questions,
+        background_summary: initialization.background_summary,
+      },
+    };
+  };
+
+  const generatePlanCellWithComment = async (answers: Record<string, string>, comment: string): Promise<Cell> => {
+    const enhancedGoal = `${goal}\n\nUser Comment: ${comment}\n\nPlease consider this feedback when generating the research plan.`;
+    const plan = await apiService.generateResearchPlan({
+      goal: enhancedGoal,
+      answers,
+      sources: [],
+      background_summary: '',
+    }) as any;
+    
+    setResearchPlan(plan);
+    
+    return {
+      id: `plan-${Date.now()}`,
+      type: 'plan',
+      content: `Research Plan (Updated)\n\nUser Feedback: ${comment}\n\n${plan.description}`,
+      timestamp: new Date().toISOString(),
+      status: 'completed',
+      requiresUserAction: false,
+      canProceed: true,
+      metadata: {
+        plan: plan,
+      },
+    };
+  };
+
+  const executeCodeWithComment = async (codeCell: Cell, comment: string): Promise<Cell> => {
+    // Create execution thread for this cell
+    const totalSteps = codeCell.metadata?.totalSteps || 1;
+    const threadId = createExecutionThread(codeCell.id, totalSteps);
+
+    // Execute the code with comment consideration
+    const enhancedCode = `${codeCell.content}\n\n# User Comment: ${comment}\n# Please consider this feedback when executing the code.`;
+    const result = await apiService.executeCode({
+      code: enhancedCode,
+      sessionId,
+    });
+    
+    // Generate result cell
+    const stepNumber = (codeCell.metadata?.stepOrder || 0) + 1;
+    const resultCell: Cell = {
+      id: `result-${Date.now()}`,
+      type: 'result',
+      content: `Execution completed (Updated) for step ${stepNumber}\n\nUser Feedback: ${comment}`,
+      timestamp: new Date().toISOString(),
+      status: 'completed',
+      requiresUserAction: false,
+      canProceed: true,
+      metadata: {
+        executionResults: [result],
+        stepOrder: codeCell.metadata?.stepOrder || 0,
+        totalSteps: codeCell.metadata?.totalSteps || 0,
+        threadId,
+      },
+    };
+
+    // Complete the execution thread
+    completeExecutionThread(threadId, [result]);
+
+    return resultCell;
+  };
+
+  const generateNextStepOrWriteupWithComment = async (resultCell: Cell, comment: string): Promise<Cell | null> => {
+    // Enhanced version that considers user feedback
+    const allResults = cells
+      .filter(cell => cell.type === 'result')
+      .flatMap(cell => cell.metadata?.executionResults || []);
+    
+    const totalSteps = resultCell.metadata?.totalSteps || 0;
+    const currentStep = resultCell.metadata?.stepOrder || 0;
+    
+    if (allResults.length >= totalSteps || allResults.length >= 3) {
+      // Generate final write-up with comment consideration
+      try {
+        const enhancedResults = [...allResults, { userFeedback: comment }];
+        const writeUpContent = await generateFinalWriteUp(enhancedResults);
+        
+        // Store the final write-up in the write-up tab
+        try {
+          await dataRouter.routeWriteUp(`# Final Write-up (Updated)\n\nUser Feedback: ${comment}\n\n${writeUpContent}`);
+          console.log('✅ Updated final write-up stored in write-up tab');
+        } catch (error) {
+          console.error('Failed to store updated final write-up:', error);
+        }
+        
+        const writeUpCell: Cell = {
+          id: `writeup-${Date.now()}`,
+          type: 'writeup',
+          content: `Final Write-up (Updated)\n\nUser Feedback: ${comment}\n\n${writeUpContent}`,
+          timestamp: new Date().toISOString(),
+          status: 'completed',
+          requiresUserAction: false,
+          canProceed: false,
+        };
+        
+        return writeUpCell;
+      } catch (error) {
+        console.error('Failed to generate updated final write-up:', error);
+        return {
+          id: `writeup-${Date.now()}`,
+          type: 'writeup',
+          content: `Error generating updated final research write-up. User Feedback: ${comment}`,
+          timestamp: new Date().toISOString(),
+          status: 'error',
+          requiresUserAction: false,
+          canProceed: false,
+        };
+      }
+    } else {
+      // Generate next execution step with comment consideration
+      const nextStepNumber = currentStep + 1;
+      const plan = researchPlan;
+      
+      if (plan && plan.steps && plan.steps[nextStepNumber]) {
+        const nextStep = plan.steps[nextStepNumber];
+        
+        const nextCodeCell: Cell = {
+          id: `code-${Date.now()}`,
+          type: 'code',
+          content: `# Step ${nextStepNumber + 1}: ${nextStep.title} (Updated)\n\nUser Feedback: ${comment}\n\n${nextStep.code || nextStep.description}`,
+          timestamp: new Date().toISOString(),
+          status: 'pending',
+          requiresUserAction: false,
+          canProceed: true,
+          metadata: {
+            stepId: nextStep.id,
+            stepOrder: nextStepNumber,
+            totalSteps: plan.steps.length,
+          },
+        };
+        
+        return nextCodeCell;
+      }
+    }
+    
+    return null;
+  };
+
   const renderCell = (cell: Cell) => {
     // Get execution thread for this cell
     const executionThread = getCellExecutionStatus(cell.id);
@@ -1043,6 +1315,8 @@ const ResearchSession: React.FC<ResearchSessionProps> = ({
         cell={cell}
         executionThread={executionThread || undefined}
         onExecute={cell.type === 'code' ? () => executeCodeStep(cell) : undefined}
+        onNextStep={handleNextStep}
+        onSubmitComment={handleSubmitComment}
       />
     );
   };

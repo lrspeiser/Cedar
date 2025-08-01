@@ -284,13 +284,7 @@ const ProjectView: React.FC<ProjectViewProps> = ({ project, onBack }) => {
       <div className="bg-white border-b border-gray-200 px-6 py-4">
         <div className="flex items-center justify-between">
           <div className="flex items-center space-x-4">
-            <button
-              onClick={onBack}
-              className="text-gray-600 hover:text-gray-900 transition-colors"
-            >
-              ← Back to Projects
-            </button>
-            <div className="flex-1 mx-8">
+            <div className="flex-1">
               {showGoalInput ? (
                 <div className="flex items-center space-x-4">
                   <div className="flex-1">
@@ -387,7 +381,7 @@ const ProjectView: React.FC<ProjectViewProps> = ({ project, onBack }) => {
             <button
               key={tab.id}
               onClick={() => setActiveTab(tab.id as TabType)}
-              className={`px-4 py-3 text-sm font-medium rounded-t-lg transition-colors flex items-center space-x-2 ${
+              className={`px-4 py-3 text-sm font-medium transition-colors flex items-center space-x-2 ${
                 activeTab === tab.id
                   ? 'bg-cedar-500 text-white'
                   : 'text-gray-600 hover:text-gray-900 hover:bg-gray-100'

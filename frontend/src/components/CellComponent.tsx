@@ -35,6 +35,8 @@ interface Cell {
 interface CellComponentProps {
   cell: Cell;
   onExecute?: (cell: Cell) => void;
+  onNextStep?: (cell: Cell) => void;
+  onSubmitComment?: (cell: Cell, comment: string) => void;
   onQuestionAnswer?: (cellId: string, questionId: string, answer: string) => void;
   executionThread?: {
     id: string;
@@ -48,12 +50,35 @@ interface CellComponentProps {
   };
 }
 
-const CellComponent: React.FC<CellComponentProps> = ({ cell, onExecute, executionThread }) => {
+const CellComponent: React.FC<CellComponentProps> = ({ cell, onExecute, onNextStep, onSubmitComment, executionThread }) => {
   const [expanded, setExpanded] = useState(true);
+  const [comment, setComment] = useState('');
+  const [showCommentInput, setShowCommentInput] = useState(false);
 
   const handleExecute = () => {
     if (onExecute) {
       onExecute(cell);
+    }
+  };
+
+  const handleNextStep = () => {
+    if (onNextStep) {
+      onNextStep(cell);
+    }
+  };
+
+  const handleSubmitComment = () => {
+    if (onSubmitComment && comment.trim()) {
+      onSubmitComment(cell, comment.trim());
+      setComment('');
+      setShowCommentInput(false);
+    }
+  };
+
+  const handleToggleCommentInput = () => {
+    setShowCommentInput(!showCommentInput);
+    if (showCommentInput) {
+      setComment('');
     }
   };
 
@@ -671,6 +696,17 @@ const CellComponent: React.FC<CellComponentProps> = ({ cell, onExecute, executio
             </button>
           )}
           
+          {/* Next Step Button for Completed Cells */}
+          {cell.status === 'completed' && cell.canProceed && onNextStep && (
+            <button
+              onClick={handleNextStep}
+              className="flex items-center space-x-1 px-3 py-1 bg-green-500 text-white text-sm rounded-md hover:bg-green-600 transition-colors"
+            >
+              <ChevronRight className="h-3 w-3" />
+              <span>Next Step</span>
+            </button>
+          )}
+          
           {/* Expand/Collapse Button */}
           <button
             onClick={() => setExpanded(!expanded)}
@@ -685,6 +721,62 @@ const CellComponent: React.FC<CellComponentProps> = ({ cell, onExecute, executio
       {expanded && (
         <div className="p-4">
           {renderCellContent()}
+          
+          {/* Comment Section */}
+          {cell.status === 'completed' && (
+            <div className="mt-6 border-t border-gray-200 pt-4">
+              <div className="flex items-center justify-between mb-3">
+                <h4 className="text-sm font-medium text-gray-900">Add Comment</h4>
+                <button
+                  onClick={handleToggleCommentInput}
+                  className="text-sm text-cedar-600 hover:text-cedar-700 transition-colors"
+                >
+                  {showCommentInput ? 'Cancel' : 'Add Comment'}
+                </button>
+              </div>
+              
+              {showCommentInput && (
+                <div className="space-y-3">
+                  <textarea
+                    value={comment}
+                    onChange={(e) => setComment(e.target.value)}
+                    placeholder="Provide feedback or suggestions for this step..."
+                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-cedar-500 focus:border-cedar-500 resize-none"
+                    rows={3}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' && e.metaKey) {
+                        handleSubmitComment();
+                      }
+                    }}
+                  />
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs text-gray-500">
+                      Press Cmd+Enter to submit
+                    </span>
+                    <div className="flex space-x-2">
+                      {cell.canProceed && onNextStep && (
+                        <button
+                          onClick={handleNextStep}
+                          className="px-3 py-1 bg-green-500 text-white text-sm rounded-md hover:bg-green-600 transition-colors"
+                        >
+                          Next Step
+                        </button>
+                      )}
+                      {onSubmitComment && (
+                        <button
+                          onClick={handleSubmitComment}
+                          disabled={!comment.trim()}
+                          className="px-3 py-1 bg-cedar-500 text-white text-sm rounded-md hover:bg-cedar-600 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                        >
+                          Submit Comment
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
         </div>
       )}
     </div>
