@@ -31,3 +31,4 @@ dotenv = "0.15"
 dirs = "5.0"
 uuid = { version = "1", features = ["v4"] }
 regex = "1.7"
+duckdb = { version = "0.9", features = ["bundled"] }

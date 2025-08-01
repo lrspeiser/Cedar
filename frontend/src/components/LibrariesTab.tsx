@@ -213,7 +213,7 @@ const LibrariesTab: React.FC<LibrariesTabProps> = ({ projectId }) => {
                 Auto-detected Libraries
               </h3>
               <p className="text-sm text-purple-700">
-                {autoDetectedLibraries.length} library{autoDetectedLibraries.length !== 1 ? 'ies' : 'y'} detected from your code and automatically added to the project.
+                {autoDetectedLibraries.length} {autoDetectedLibraries.length === 1 ? 'library' : 'libraries'} detected from your code and automatically added to the project.
                 {pendingLibraries.filter(l => l.source === 'auto_detected').length > 0 && (
                   <span> Some are being installed automatically.</span>
                 )}

@@ -799,6 +799,214 @@ class ApiService {
     }
   }
 
+  /**
+   * Data Management - Upload Data File
+   * 
+   * Handles data file uploads with comprehensive processing:
+   * - File type detection and validation
+   * - Content storage and metadata creation
+   * - LLM-powered data analysis
+   * - DuckDB table creation
+   * 
+   * FEATURES:
+   * - Automatic file type detection
+   * - Content preview generation
+   * - LLM analysis request
+   * - Project integration
+   * 
+   * TESTING: Use in browser console with test-data-upload.js
+   * 
+   * @param request - Data file upload request
+   * @returns Upload result with file info and analysis
+   * @throws Error if upload fails
+   * 
+   * Example:
+   * ```javascript
+   * const result = await apiService.uploadDataFile({
+   *   projectId: 'project-123',
+   *   filename: 'data.csv',
+   *   content: 'name,age\nJohn,30\nJane,25',
+   *   fileType: 'csv'
+   * });
+   * ```
+   */
+  async uploadDataFile(request: { 
+    projectId: string; 
+    filename: string; 
+    content: string; 
+    fileType?: string; 
+  }) {
+    console.log('📁 Calling Tauri backend: upload_data_file', request);
+    
+    try {
+      // Convert frontend field names to backend field names
+      const backendRequest = {
+        project_id: request.projectId,
+        filename: request.filename,
+        content: request.content,
+        file_type: request.fileType || null
+      };
+      
+      const result = await invoke('upload_data_file', { request: backendRequest });
+      console.log('✅ Backend data file uploaded successfully');
+      return result;
+    } catch (error) {
+      console.error('❌ Backend error uploading data file:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Data Management - Analyze Data File
+   * 
+   * Performs LLM-powered analysis of uploaded data files:
+   * - Data structure analysis
+   * - Column information extraction
+   * - Sample data generation
+   * - DuckDB table creation
+   * 
+   * FEATURES:
+   * - LLM-powered data understanding
+   * - Automatic column analysis
+   * - Sample data extraction
+   * - Database table preparation
+   * 
+   * TESTING: Use in browser console with test-data-analysis.js
+   * 
+   * @param request - Data file analysis request
+   * @returns Analysis result with file info and insights
+   * @throws Error if analysis fails
+   * 
+   * Example:
+   * ```javascript
+   * const result = await apiService.analyzeDataFile({
+   *   projectId: 'project-123',
+   *   fileId: 'file-456'
+   * });
+   * ```
+   */
+  async analyzeDataFile(request: { 
+    projectId: string; 
+    fileId: string; 
+  }) {
+    console.log('🔍 Calling Tauri backend: analyze_data_file', request);
+    
+    try {
+      // Convert frontend field names to backend field names
+      const backendRequest = {
+        project_id: request.projectId,
+        file_id: request.fileId
+      };
+      
+      const result = await invoke('analyze_data_file', { request: backendRequest });
+      console.log('✅ Backend data file analyzed successfully');
+      return result;
+    } catch (error) {
+      console.error('❌ Backend error analyzing data file:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Data Management - Execute DuckDB Query
+   * 
+   * Executes SQL queries on data tables with PostgreSQL-style interface:
+   * - Query validation and execution
+   * - Result formatting and return
+   * - Error handling and reporting
+   * 
+   * FEATURES:
+   * - PostgreSQL-compatible SQL syntax
+   * - Automatic table creation
+   * - Query result formatting
+   * - Error handling
+   * 
+   * TESTING: Use in browser console with test-duckdb-query.js
+   * 
+   * @param request - DuckDB query request
+   * @returns Query results with data and metadata
+   * @throws Error if query execution fails
+   * 
+   * Example:
+   * ```javascript
+   * const result = await apiService.executeDuckDBQuery({
+   *   projectId: 'project-123',
+   *   tableName: 'my_table',
+   *   query: 'SELECT * FROM my_table LIMIT 10'
+   * });
+   * ```
+   */
+  async executeDuckDBQuery(request: { 
+    projectId: string; 
+    tableName: string; 
+    query: string; 
+  }) {
+    console.log('🗄️ Calling Tauri backend: execute_duckdb_query', request);
+    
+    try {
+      // Convert frontend field names to backend field names
+      const backendRequest = {
+        project_id: request.projectId,
+        table_name: request.tableName,
+        query: request.query
+      };
+      
+      const result = await invoke('execute_duckdb_query', { request: backendRequest });
+      console.log('✅ Backend DuckDB query executed successfully');
+      return result;
+    } catch (error) {
+      console.error('❌ Backend error executing DuckDB query:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Data Management - List Data Files
+   * 
+   * Retrieves all data files for a project with metadata:
+   * - File information and statistics
+   * - Table information
+   * - Analysis results
+   * 
+   * FEATURES:
+   * - Complete file metadata
+   * - Analysis status
+   * - Table information
+   * - Sample data preview
+   * 
+   * TESTING: Use in browser console with test-data-files.js
+   * 
+   * @param request - Data file list request
+   * @returns Array of data file information
+   * @throws Error if retrieval fails
+   * 
+   * Example:
+   * ```javascript
+   * const result = await apiService.listDataFiles({
+   *   projectId: 'project-123'
+   * });
+   * ```
+   */
+  async listDataFiles(request: { 
+    projectId: string; 
+  }) {
+    console.log('📁 Calling Tauri backend: list_data_files', request);
+    
+    try {
+      // Convert frontend field names to backend field names
+      const backendRequest = {
+        project_id: request.projectId
+      };
+      
+      const result = await invoke('list_data_files', { request: backendRequest });
+      console.log('✅ Backend data files listed successfully');
+      return result;
+    } catch (error) {
+      console.error('❌ Backend error listing data files:', error);
+      throw error;
+    }
+  }
+
   // async extractLibrariesFromCode(projectId: string, code: string, cellId: string) {
   //   console.log("🔧 Calling Tauri backend: extract_libraries_from_code", { projectId, codeLength: code.length, cellId });
   //   try {

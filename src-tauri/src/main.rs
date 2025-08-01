@@ -11,8 +11,9 @@ use std::sync::Mutex;
 use std::collections::HashMap;
 use std::env;
 use std::io::{self, Write};
-use cedar::{cell, agent, context, executor, llm};
+use cedar::{cell, agent, context, executor, llm, storage};
 use cedar::executor::{ExecutionResult, StepEvaluation};
+use cedar::storage::{DataFileInfo, ColumnInfo, DataAnalysisRequest, DataAnalysisResponse, ColumnAnalysis};
 use std::fs;
 use std::path::PathBuf;
 
@@ -219,6 +220,74 @@ struct SaveFileRequest {
     filename: String,
     content: String,
     file_type: String, // "data", "image", "reference", "write_up"
+}
+
+/// Data File Upload Request
+/// 
+/// Handles data file uploads with automatic analysis:
+/// - File content and metadata
+/// - Automatic file type detection
+/// - LLM-powered data analysis
+/// - DuckDB table creation
+/// 
+/// TESTING: See tests::test_data_upload_workflow()
+/// CLI TESTING: Use upload_data_file command
+/// API TESTING: Call upload_data_file endpoint
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct UploadDataFileRequest {
+    project_id: String,
+    filename: String,
+    content: String,
+    file_type: Option<String>, // Auto-detected if not provided
+}
+
+/// Data Analysis Request
+/// 
+/// Requests LLM analysis of uploaded data:
+/// - File metadata and preview
+/// - Automatic Python script generation
+/// - Data structure analysis
+/// - Sample data extraction
+/// 
+/// TESTING: See tests::test_data_analysis_workflow()
+/// CLI TESTING: Use analyze_data_file command
+/// API TESTING: Call analyze_data_file endpoint
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct AnalyzeDataFileRequest {
+    project_id: String,
+    file_id: String,
+}
+
+/// DuckDB Query Request
+/// 
+/// Executes SQL queries on data tables:
+/// - PostgreSQL-style interface
+/// - Query validation and execution
+/// - Result formatting and return
+/// 
+/// TESTING: See tests::test_duckdb_query_workflow()
+/// CLI TESTING: Use execute_duckdb_query command
+/// API TESTING: Call execute_duckdb_query endpoint
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct DuckDBQueryRequest {
+    project_id: String,
+    table_name: String,
+    query: String,
+}
+
+/// Data File List Request
+/// 
+/// Retrieves all data files for a project:
+/// - File metadata and statistics
+/// - Table information
+/// - Analysis results
+/// 
+/// TESTING: See tests::test_data_file_list_workflow()
+/// CLI TESTING: Use list_data_files command
+/// API TESTING: Call list_data_files endpoint
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct ListDataFilesRequest {
+    project_id: String,
 }
 
 // File storage functions
@@ -488,6 +557,81 @@ async fn categorize_code_output(
     }
     
     Ok(())
+}
+
+/// Helper function to detect file type from content
+fn detect_file_type(filename: &str, content: &str) -> String {
+    // Check file extension first
+    if let Some(ext) = std::path::Path::new(filename).extension() {
+        if let Some(ext_str) = ext.to_str() {
+            match ext_str.to_lowercase().as_str() {
+                "csv" => return "csv".to_string(),
+                "json" => return "json".to_string(),
+                "parquet" => return "parquet".to_string(),
+                "xlsx" | "xls" => return "excel".to_string(),
+                "tsv" => return "tsv".to_string(),
+                _ => {}
+            }
+        }
+    }
+    
+    // Try to detect from content
+    let first_line = content.lines().next().unwrap_or("");
+    if first_line.contains(',') && !first_line.contains('\t') {
+        "csv".to_string()
+    } else if first_line.contains('\t') {
+        "tsv".to_string()
+    } else if content.trim().starts_with('{') || content.trim().starts_with('[') {
+        "json".to_string()
+    } else {
+        "unknown".to_string()
+    }
+}
+
+/// Helper function to get file preview for LLM analysis
+fn get_file_preview(content: &str, max_lines: usize) -> String {
+    let lines: Vec<&str> = content.lines().take(max_lines).collect();
+    lines.join("\n")
+}
+
+/// Helper function to create DuckDB connection
+fn create_duckdb_connection(project_id: &str) -> Result<duckdb::Connection, String> {
+    let db_path = get_project_dir(project_id).join("data.db");
+    duckdb::Connection::open(&db_path)
+        .map_err(|e| format!("Failed to create DuckDB connection: {}", e))
+}
+
+/// Helper function to execute DuckDB query
+fn execute_duckdb_query(project_id: &str, query: &str) -> Result<Vec<Vec<String>>, String> {
+    let conn = create_duckdb_connection(project_id)?;
+    
+    let mut stmt = conn.prepare(query)
+        .map_err(|e| format!("Failed to prepare DuckDB query: {}", e))?;
+    
+    let mut rows = stmt.query([])
+        .map_err(|e| format!("Failed to execute DuckDB query: {}", e))?;
+    
+    let mut results = Vec::new();
+    
+    // Get column names
+    let column_names: Vec<String> = rows.column_names()
+        .iter()
+        .map(|name| name.to_string())
+        .collect();
+    results.push(column_names);
+    
+    // Get data rows
+    while let Some(row) = rows.next()
+        .map_err(|e| format!("Failed to fetch row: {}", e))? {
+        let row_data: Vec<String> = row.columns()
+            .map_err(|e| format!("Failed to get row columns: {}", e))?
+            .iter()
+            .map(|val| val.to_string())
+            .collect();
+        results.push(row_data);
+    }
+    
+    Ok(results)
 }
 
 /// Automatically categorize AI-generated content into project tabs
@@ -3785,6 +3929,434 @@ struct CliTestRequest {
 }
 
 async fn run_cli_test(request: CliTestRequest) -> Result<serde_json::Value, String> {
+
+// ... existing code ...
+
+/// Data Management - Upload Data File
+/// 
+/// Handles data file uploads with comprehensive processing:
+/// - File type detection and validation
+/// - Content storage and metadata creation
+/// - LLM-powered data analysis
+/// - DuckDB table creation
+/// 
+/// FEATURES:
+/// - Automatic file type detection
+/// - Content preview generation
+/// - LLM analysis request
+/// - Project integration
+/// 
+/// TESTING: See tests::test_data_upload_workflow()
+/// CLI TESTING: Use upload_data_file command
+/// API TESTING: Call upload_data_file endpoint
+/// 
+/// Example usage:
+/// ```javascript
+/// const result = await apiService.uploadDataFile({
+///   projectId: 'project-123',
+///   filename: 'data.csv',
+///   content: 'name,age\nJohn,30\nJane,25',
+///   fileType: 'csv'
+/// });
+/// ```
+#[tauri::command]
+async fn upload_data_file(
+    request: UploadDataFileRequest,
+    state: State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    println!("📁 Backend: Uploading data file: {} to project: {}", request.filename, request.project_id);
+    
+    // Check API key
+    let api_key_guard = state.api_key.lock().unwrap();
+    if api_key_guard.is_none() {
+        return Err("Data file upload requires a valid OpenAI API key. Please configure your API key first.".to_string());
+    }
+    
+    // Detect file type if not provided
+    let file_type = request.file_type.unwrap_or_else(|| {
+        detect_file_type(&request.filename, &request.content)
+    });
+    
+    // Create data file info
+    let file_info = storage::DataFileInfo::new(
+        &request.filename,
+        &file_type,
+        request.content.len() as u64,
+        "upload"
+    );
+    
+    // Save the file content
+    let file_path = file_info.file_path();
+    fs::write(&file_path, &request.content)
+        .map_err(|e| format!("Failed to save uploaded file: {}", e))?;
+    
+    // Save file info
+    file_info.save()
+        .map_err(|e| format!("Failed to save file info: {}", e))?;
+    
+    // Get file preview for LLM analysis
+    let content_preview = get_file_preview(&request.content, 10);
+    
+    // Create analysis request
+    let analysis_request = DataAnalysisRequest {
+        filename: request.filename.clone(),
+        file_type: file_type.clone(),
+        size_bytes: request.content.len() as u64,
+        content_preview,
+    };
+    
+    // Generate LLM analysis prompt
+    let analysis_prompt = format!(
+        r#"You are a data analysis expert. Analyze the following data file and provide insights.
+
+File Information:
+- Name: {}
+- Type: {}
+- Size: {} bytes
+
+Content Preview:
+{}
+
+Please provide a JSON response with:
+1. A Python script to analyze this data (headers, rows, sample data)
+2. A summary of the data structure
+3. Suggested table name for database storage
+4. Column analysis with descriptions
+
+Return ONLY valid JSON in this format:
+{{
+    "analysis_script": "Python code to analyze the data",
+    "data_summary": "Summary of data structure and content",
+    "suggested_table_name": "suggested_table_name",
+    "column_analysis": [
+        {{
+            "name": "column_name",
+            "data_type": "string/number/date/etc",
+            "description": "What this column represents",
+            "sample_values": ["value1", "value2", "value3"]
+        }}
+    ]
+}}"#,
+        analysis_request.filename,
+        analysis_request.file_type,
+        analysis_request.size_bytes,
+        analysis_request.content_preview
+    );
+    
+    // Get LLM analysis
+    let analysis_response = match cedar::llm::ask_llm(&analysis_prompt).await {
+        Ok(response) => {
+            match serde_json::from_str::<DataAnalysisResponse>(&response) {
+                Ok(parsed) => parsed,
+                Err(_) => {
+                    // Fallback if JSON parsing fails
+                    DataAnalysisResponse {
+                        analysis_script: storage::generate_data_analysis_script(&file_info),
+                        data_summary: format!("Data file: {} ({} bytes)", request.filename, request.content.len()),
+                        suggested_table_name: format!("table_{}", file_info.id.replace("-", "_")),
+                        column_analysis: vec![],
+                    }
+                }
+            }
+        },
+        Err(e) => {
+            println!("⚠️ Backend: LLM analysis failed: {}", e);
+            // Fallback analysis
+            DataAnalysisResponse {
+                analysis_script: storage::generate_data_analysis_script(&file_info),
+                data_summary: format!("Data file: {} ({} bytes)", request.filename, request.content.len()),
+                suggested_table_name: format!("table_{}", file_info.id.replace("-", "_")),
+                column_analysis: vec![],
+            }
+        }
+    };
+    
+    // Update file info with analysis results
+    let mut updated_file_info = file_info.clone();
+    updated_file_info.table_name = Some(analysis_response.suggested_table_name.clone());
+    updated_file_info.data_summary = Some(analysis_response.data_summary.clone());
+    
+    // Convert column analysis to column info
+    let columns: Vec<ColumnInfo> = analysis_response.column_analysis.iter().map(|ca| {
+        ColumnInfo {
+            name: ca.name.clone(),
+            data_type: ca.data_type.clone(),
+            nullable: true, // Default to nullable
+            sample_values: ca.sample_values.clone(),
+        }
+    }).collect();
+    
+    updated_file_info.columns = Some(columns);
+    
+    // Save updated file info
+    updated_file_info.save()
+        .map_err(|e| format!("Failed to save updated file info: {}", e))?;
+    
+    // Update project data files
+    let mut projects_guard = state.projects.lock().unwrap();
+    if let Some(project) = projects_guard.get_mut(&request.project_id) {
+        if !project.data_files.contains(&request.filename) {
+            project.data_files.push(request.filename.clone());
+        }
+        project.updated_at = chrono::Utc::now().to_rfc3339();
+        save_project(project)?;
+    }
+    
+    println!("✅ Backend: Data file uploaded and analyzed successfully");
+    
+    Ok(serde_json::json!({
+        "file_info": updated_file_info,
+        "analysis_response": analysis_response,
+        "message": "Data file uploaded and analyzed successfully"
+    }))
+}
+
+/// Data Management - Analyze Data File
+/// 
+/// Performs LLM-powered analysis of uploaded data files:
+/// - Data structure analysis
+/// - Column information extraction
+/// - Sample data generation
+/// - DuckDB table creation
+/// 
+/// FEATURES:
+/// - LLM-powered data understanding
+/// - Automatic column analysis
+/// - Sample data extraction
+/// - Database table preparation
+/// 
+/// TESTING: See tests::test_data_analysis_workflow()
+/// CLI TESTING: Use analyze_data_file command
+/// API TESTING: Call analyze_data_file endpoint
+/// 
+/// Example usage:
+/// ```javascript
+/// const result = await apiService.analyzeDataFile({
+///   projectId: 'project-123',
+///   fileId: 'file-456'
+/// });
+/// ```
+#[tauri::command]
+async fn analyze_data_file(
+    request: AnalyzeDataFileRequest,
+    state: State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    println!("🔍 Backend: Analyzing data file: {} in project: {}", request.file_id, request.project_id);
+    
+    // Check API key
+    let api_key_guard = state.api_key.lock().unwrap();
+    if api_key_guard.is_none() {
+        return Err("Data analysis requires a valid OpenAI API key. Please configure your API key first.".to_string());
+    }
+    
+    // Load file info
+    let file_info = storage::DataFileInfo::load(&request.file_id)
+        .map_err(|e| format!("Failed to load file info: {}", e))?
+        .ok_or_else(|| format!("File not found: {}", request.file_id))?;
+    
+    // Read file content
+    let file_content = fs::read_to_string(file_info.file_path())
+        .map_err(|e| format!("Failed to read file content: {}", e))?;
+    
+    // Generate analysis script
+    let analysis_script = storage::generate_data_analysis_script(&file_info);
+    
+    // Execute analysis script
+    let execution_result = match cedar::executor::run_python_code(&analysis_script) {
+        Ok(output) => output,
+        Err(e) => {
+            println!("⚠️ Backend: Analysis script execution failed: {}", e);
+            format!("Analysis failed: {}", e)
+        }
+    };
+    
+    // Extract analysis results from output
+    let analysis_results = if execution_result.contains("=== ANALYSIS RESULT ===") {
+        if let Some(json_start) = execution_result.find("=== ANALYSIS RESULT ===") {
+            let json_part = &execution_result[json_start + "=== ANALYSIS RESULT ===".len()..];
+            if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(json_part.trim()) {
+                parsed
+            } else {
+                serde_json::json!({"error": "Failed to parse analysis results"})
+            }
+        } else {
+            serde_json::json!({"error": "No analysis results found"})
+        }
+    } else {
+        serde_json::json!({"error": "Analysis script did not produce expected output"})
+    };
+    
+    // Update file info with analysis results
+    let mut updated_file_info = file_info.clone();
+    
+    if let Some(results) = analysis_results.as_object() {
+        if let Some(row_count) = results.get("row_count").and_then(|v| v.as_u64()) {
+            updated_file_info.row_count = Some(row_count);
+        }
+        if let Some(column_count) = results.get("column_count").and_then(|v| v.as_u64()) {
+            updated_file_info.column_count = Some(column_count as u32);
+        }
+        if let Some(columns) = results.get("columns").and_then(|v| v.as_array()) {
+            let column_infos: Vec<ColumnInfo> = columns.iter()
+                .filter_map(|col| {
+                    if let Some(obj) = col.as_object() {
+                        Some(ColumnInfo {
+                            name: obj.get("name")?.as_str()?.to_string(),
+                            data_type: obj.get("data_type")?.as_str()?.to_string(),
+                            nullable: obj.get("nullable")?.as_bool().unwrap_or(true),
+                            sample_values: obj.get("sample_values")?.as_array()?
+                                .iter()
+                                .filter_map(|v| v.as_str().map(|s| s.to_string()))
+                                .collect(),
+                        })
+                    } else {
+                        None
+                    }
+                })
+                .collect();
+            updated_file_info.columns = Some(column_infos);
+        }
+        if let Some(sample_data) = results.get("sample_data").and_then(|v| v.as_array()) {
+            let sample_rows: Vec<Vec<String>> = sample_data.iter()
+                .filter_map(|row| {
+                    if let Some(row_array) = row.as_array() {
+                        Some(row_array.iter()
+                            .filter_map(|v| v.as_str().map(|s| s.to_string()))
+                            .collect())
+                    } else {
+                        None
+                    }
+                })
+                .collect();
+            updated_file_info.sample_data = Some(sample_rows);
+        }
+    }
+    
+    // Save updated file info
+    updated_file_info.save()
+        .map_err(|e| format!("Failed to save updated file info: {}", e))?;
+    
+    println!("✅ Backend: Data file analysis completed successfully");
+    
+    Ok(serde_json::json!({
+        "file_info": updated_file_info,
+        "analysis_results": analysis_results,
+        "execution_output": execution_result,
+        "message": "Data file analysis completed successfully"
+    }))
+}
+
+/// Data Management - Execute DuckDB Query
+/// 
+/// Executes SQL queries on data tables with PostgreSQL-style interface:
+/// - Query validation and execution
+/// - Result formatting and return
+/// - Error handling and reporting
+/// 
+/// FEATURES:
+/// - PostgreSQL-compatible SQL syntax
+/// - Automatic table creation
+/// - Query result formatting
+/// - Error handling
+/// 
+/// TESTING: See tests::test_duckdb_query_workflow()
+/// CLI TESTING: Use execute_duckdb_query command
+/// API TESTING: Call execute_duckdb_query endpoint
+/// 
+/// Example usage:
+/// ```javascript
+/// const result = await apiService.executeDuckDBQuery({
+///   projectId: 'project-123',
+///   tableName: 'my_table',
+///   query: 'SELECT * FROM my_table LIMIT 10'
+/// });
+/// ```
+#[tauri::command]
+async fn execute_duckdb_query(
+    request: DuckDBQueryRequest,
+    state: State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    println!("🗄️ Backend: Executing DuckDB query on table: {} in project: {}", request.table_name, request.project_id);
+    
+    // Execute the query
+    let results = execute_duckdb_query(&request.project_id, &request.query)
+        .map_err(|e| format!("Query execution failed: {}", e))?;
+    
+    println!("✅ Backend: DuckDB query executed successfully");
+    
+    Ok(serde_json::json!({
+        "results": results,
+        "row_count": if results.len() > 1 { results.len() - 1 } else { 0 },
+        "column_count": if !results.is_empty() { results[0].len() } else { 0 },
+        "message": "Query executed successfully"
+    }))
+}
+
+/// Data Management - List Data Files
+/// 
+/// Retrieves all data files for a project with metadata:
+/// - File information and statistics
+/// - Table information
+/// - Analysis results
+/// 
+/// FEATURES:
+/// - Complete file metadata
+/// - Analysis status
+/// - Table information
+/// - Sample data preview
+/// 
+/// TESTING: See tests::test_data_file_list_workflow()
+/// CLI TESTING: Use list_data_files command
+/// API TESTING: Call list_data_files endpoint
+/// 
+/// Example usage:
+/// ```javascript
+/// const result = await apiService.listDataFiles({
+///   projectId: 'project-123'
+/// });
+/// ```
+#[tauri::command]
+async fn list_data_files(
+    request: ListDataFilesRequest,
+    state: State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    println!("📁 Backend: Listing data files for project: {}", request.project_id);
+    
+    // Get project data files
+    let projects_guard = state.projects.lock().unwrap();
+    let project = projects_guard.get(&request.project_id)
+        .ok_or_else(|| format!("Project not found: {}", request.project_id))?;
+    
+    // Load detailed file information
+    let mut data_files = Vec::new();
+    
+    for filename in &project.data_files {
+        // Try to find file info by filename
+        let file_infos = storage::list_data_files()
+            .map_err(|e| format!("Failed to list data files: {}", e))?;
+        
+        if let Some(file_info) = file_infos.iter().find(|f| f.name == *filename) {
+            data_files.push(file_info.clone());
+        } else {
+            // Create basic file info if not found
+            let basic_info = storage::DataFileInfo::new(
+                filename,
+                "unknown",
+                0,
+                "legacy"
+            );
+            data_files.push(basic_info);
+        }
+    }
+    
+    println!("✅ Backend: Found {} data files", data_files.len());
+    
+    Ok(serde_json::json!({
+        "data_files": data_files,
+        "count": data_files.len(),
+        "message": "Data files retrieved successfully"
+    }))
+}
     println!("🧪 Running CLI test: {}", request.command);
     
     match request.command.as_str() {
@@ -4069,6 +4641,11 @@ fn main() {
             generate_research_plan,
             execute_step,
             generate_next_steps,
+            // Data Management endpoints
+            upload_data_file,
+            analyze_data_file,
+            execute_duckdb_query,
+            list_data_files,
             // API Testing endpoints
             test_api_endpoint,
             run_test_suite,

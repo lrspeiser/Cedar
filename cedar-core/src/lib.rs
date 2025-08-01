@@ -9,3 +9,9 @@ pub mod output_parser;
 pub mod code_preprocessor;
 pub mod storage;
 pub mod publication;
+
+// Re-export key types for easier access
+pub use storage::{
+    DataFileInfo, ColumnInfo, DataAnalysisRequest, DataAnalysisResponse, 
+    ColumnAnalysis, DuckDBTableInfo, DatasetManifest
+};
