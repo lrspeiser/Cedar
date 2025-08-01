@@ -163,9 +163,9 @@ const ProjectView: React.FC<ProjectViewProps> = ({ project, onBack }) => {
     } catch (error) {
       console.error('Failed to start research:', error);
       alert('Failed to start research. Please try again.');
+      setIsResearchStarting(false);
     } finally {
       setIsGeneratingTitle(false);
-      setIsResearchStarting(false);
     }
   };
 
@@ -286,31 +286,33 @@ const ProjectView: React.FC<ProjectViewProps> = ({ project, onBack }) => {
           <div className="flex items-center space-x-4">
             <div className="flex-1">
               {showGoalInput ? (
-                <div className="flex items-center space-x-4">
-                  <div className="flex-1">
-                    <input
-                      type="text"
-                      value={researchGoal}
-                      onChange={(e) => setResearchGoal(e.target.value)}
-                      placeholder="What would you like to research?"
-                      className="w-full px-4 py-2 border border-gray-300 rounded-md focus:ring-cedar-500 focus:border-cedar-500"
-                      onKeyDown={(e) => {
-                        if (e.key === 'Enter') {
-                          handleResearchGoalSubmit();
-                        }
-                      }}
-                    />
+                <div className="w-full">
+                  <div className="flex items-center justify-between w-full">
+                    <div className="flex-1 mr-4">
+                      <input
+                        type="text"
+                        value={researchGoal}
+                        onChange={(e) => setResearchGoal(e.target.value)}
+                        placeholder="What would you like to research?"
+                        className="w-full px-4 py-2 border border-gray-300 rounded-md focus:ring-cedar-500 focus:border-cedar-500"
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') {
+                            handleResearchGoalSubmit();
+                          }
+                        }}
+                      />
+                    </div>
+                    <button
+                      onClick={handleResearchGoalSubmit}
+                      disabled={!researchGoal.trim() || isGeneratingTitle}
+                      className="bg-cedar-500 text-white px-6 py-2 rounded-md hover:bg-cedar-600 disabled:opacity-50 flex-shrink-0"
+                    >
+                      {isGeneratingTitle ? 'Creating Name...' : 'Start Research'}
+                    </button>
                   </div>
-                  <button
-                    onClick={handleResearchGoalSubmit}
-                    disabled={!researchGoal.trim() || isGeneratingTitle}
-                    className="bg-cedar-500 text-white px-6 py-2 rounded-md hover:bg-cedar-600 disabled:opacity-50"
-                  >
-                    {isGeneratingTitle ? 'Creating Name...' : 'Start Research'}
-                  </button>
                 </div>
               ) : (
-                <div className="text-center">
+                <div className="text-left">
                   <h1 className="text-2xl font-bold text-gray-900">
                     {isGeneratingTitle ? 'Creating Name...' : projectData.name}
                   </h1>
@@ -321,14 +323,7 @@ const ProjectView: React.FC<ProjectViewProps> = ({ project, onBack }) => {
               )}
             </div>
           </div>
-          <div className="flex items-center">
-            <button
-              onClick={() => setShowDeleteConfirm(true)}
-              className="text-red-600 hover:text-red-800 text-sm underline transition-colors"
-            >
-              Delete Project
-            </button>
-          </div>
+
         </div>
       </div>
 

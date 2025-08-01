@@ -2341,16 +2341,19 @@ async fn start_research(
         return Err("Research requires a valid OpenAI API key. Please configure your API key first.".to_string());
     }
     
-    // Create initial session with just the goal cell
-    // The ResearchSession component will handle the rest of the flow
-    let goal_cell = serde_json::json!({
-        "id": "goal-1",
-        "type": "goal",
-        "content": request.goal,
+    // Create initial session with research initialization already started
+    // Skip the goal cell and start directly with research initialization
+    let initialization_cell = serde_json::json!({
+        "id": "initialization-1",
+        "type": "initialization",
+        "content": format!("Research initialization started for: {}", request.goal),
         "timestamp": chrono::Utc::now().to_rfc3339(),
-        "status": "completed",
+        "status": "active",
         "requiresUserAction": false,
-        "canProceed": true
+        "canProceed": true,
+        "metadata": {
+            "goal": request.goal
+        }
     });
     
     // Save the initial session to memory and disk
@@ -2359,16 +2362,20 @@ async fn start_research(
         let session_data = serde_json::json!({
             "project_id": request.project_id,
             "goal": request.goal,
-            "cells": [goal_cell],
+            "cells": [initialization_cell],
             "status": "active",
             "created_at": chrono::Utc::now().to_rfc3339(),
             "execution_results": []
         });
         sessions.insert(request.session_id.clone(), session_data.clone());
         
+        println!("💾 Session saved to memory: {}", request.session_id);
+        
         // Also save to disk for persistence
         if let Err(e) = save_session_to_disk(&request.session_id, &session_data) {
             println!("⚠️ Failed to save session to disk: {}", e);
+        } else {
+            println!("💾 Session saved to disk: {}", request.session_id);
         }
     }
     
@@ -2394,7 +2401,7 @@ async fn start_research(
         "session_id": request.session_id,
         "project_id": request.project_id,
         "status": "active",
-        "cells": [goal_cell]
+        "cells": [initialization_cell]
     }))
 }
 
@@ -3359,6 +3366,80 @@ struct InitializeResearchRequest {
     goal: String,
 }
 
+// New step-by-step research structs
+#[derive(Deserialize)]
+struct GenerateAcademicPapersRequest {
+    goal: String,
+    notebook_history: Option<Vec<serde_json::Value>>,
+    user_feedback: Option<String>,
+}
+
+#[derive(Serialize)]
+struct GenerateAcademicPapersResponse {
+    sources: Vec<ResearchSource>,
+}
+
+#[derive(Deserialize)]
+struct GenerateAbstractRequest {
+    goal: String,
+    academic_sources: Vec<ResearchSource>,
+    notebook_history: Option<Vec<serde_json::Value>>,
+    user_feedback: Option<String>,
+}
+
+#[derive(Serialize)]
+struct GenerateAbstractResponse {
+    abstract_content: String,
+}
+
+#[derive(Deserialize)]
+struct GenerateResearchStepsRequest {
+    goal: String,
+    academic_sources: Vec<ResearchSource>,
+    abstract_content: String,
+    notebook_history: Option<Vec<serde_json::Value>>,
+    user_feedback: Option<String>,
+}
+
+#[derive(Serialize)]
+struct GenerateResearchStepsResponse {
+    steps: Vec<ResearchPlanStep>,
+    expected_outcome: String,
+}
+
+#[derive(Deserialize)]
+struct GenerateResearchStepRequest {
+    goal: String,
+    step_index: usize,
+    step_title: String,
+    academic_sources: Vec<ResearchSource>,
+    abstract_content: String,
+    previous_steps: Vec<serde_json::Value>,
+    notebook_history: Option<Vec<serde_json::Value>>,
+    user_feedback: Option<String>,
+}
+
+#[derive(Serialize)]
+struct GenerateResearchStepResponse {
+    step: ResearchPlanStep,
+}
+
+#[derive(Deserialize)]
+struct UpdateResearchWriteUpRequest {
+    goal: String,
+    academic_sources: Vec<ResearchSource>,
+    abstract_content: String,
+    completed_steps: Vec<serde_json::Value>,
+    execution_results: Vec<serde_json::Value>,
+    notebook_history: Option<Vec<serde_json::Value>>,
+    user_feedback: Option<String>,
+}
+
+#[derive(Serialize)]
+struct UpdateResearchWriteUpResponse {
+    write_up_content: String,
+}
+
 #[derive(Deserialize)]
 struct GenerateTitleRequest {
     goal: String,
@@ -3432,7 +3513,7 @@ struct ResearchQuestion {
     required: bool,
 }
 
-#[derive(serde::Serialize)]
+#[derive(serde::Deserialize, serde::Serialize)]
 struct ResearchPlanStep {
     id: String,
     title: String,
@@ -3994,7 +4075,7 @@ async fn generate_research_plan(
     
     // Generate research plan using LLM
     let prompt = format!(
-        r#"Based on the research goal and collected data, create an implementation plan focused on code and data analysis:
+        r#"Based on the research goal and collected data, create a structured implementation plan with distinct phases:
 
 RESEARCH GOAL: "{}"
 
@@ -4003,63 +4084,87 @@ COLLECTED DATA:
 - Background: {}
 - User Input: {}
 
-Create a practical implementation plan with these requirements:
+Create a structured implementation plan with these distinct phases:
 
 1. PLAN TITLE: Short, action-oriented title (5 words max)
 2. PLAN DESCRIPTION: Brief overview of the implementation approach
-3. IMPLEMENTATION STEPS: Focused on data analysis and code execution
+3. IMPLEMENTATION PHASES: Each phase should be self-contained and build on previous phases
 
-Each step MUST include:
+PHASE STRUCTURE:
+- Each phase should have a clear purpose and deliverables
+- Phases should be: Data Collection → Data Processing → Analysis → Results
+- Each phase should generate data that gets stored in appropriate tabs
+- Each phase should identify required libraries and variables
+
+PHASE REQUIREMENTS:
+Each phase MUST include:
 - Specific, actionable title
 - Clear description of what the code will accomplish
 - Complete, runnable Python code (REQUIRED - cannot be empty)
 - Expected outputs and deliverables
+- What data will be stored and where
 
-                The plan should:
-                - Skip literature review (already completed)
-                - Focus on data processing and analysis
-                - Include concrete code examples
-                - Be immediately executable
-                - Generate meaningful insights
-                - Create data that can be stored in our database
-                
-                DATA STORAGE INSTRUCTIONS:
-                - When creating DataFrames, arrays, or other data structures, use descriptive variable names
-                - Include print statements to show the data structure and content
-                - Use .to_csv(), .to_json(), or similar methods to save data when appropriate
-                - Add comments explaining what the data represents
-                - Our system will automatically detect and store created data in DuckDB tables
+DATA STORAGE INSTRUCTIONS:
+- When creating DataFrames, arrays, or other data structures, use descriptive variable names
+- Include print statements to show the data structure and content
+- Use .to_csv(), .to_json(), or similar methods to save data when appropriate
+- Add comments explaining what the data represents
+- Our system will automatically detect and store created data in DuckDB tables
+- Libraries will be automatically detected and added to the Libraries tab
+- Variables will be automatically detected and added to the Variables tab
 
-IMPORTANT: Every step must have actual Python code that can be executed. Do not leave code fields empty.
+PHASE EXAMPLES:
+- Phase 1: "Data Collection" - Gather and prepare raw data
+- Phase 2: "Data Processing" - Clean, transform, and structure data
+- Phase 3: "Analysis" - Perform statistical analysis and modeling
+- Phase 4: "Results" - Generate final outputs and visualizations
+
+IMPORTANT: Every phase must have actual Python code that can be executed. Do not leave code fields empty.
 
 Return ONLY a JSON object:
 {{
     "id": "plan_{}",
-    "title": "Implementation Plan",
-    "description": "Focused implementation plan for data analysis...",
+    "title": "Structured Implementation Plan",
+    "description": "Phase-based implementation plan for data analysis...",
     "steps": [
         {{
-            "id": "step_1",
-            "title": "Data Setup and Loading",
-            "description": "Prepare the data environment and load required datasets...",
-            "code": "import pandas as pd\nimport numpy as np\n\n# Load data\ndata = pd.read_csv('data.csv')\nprint('Data loaded successfully')\nprint(f'Shape: {{data.shape}}')",
+            "id": "phase_1",
+            "title": "Data Collection Phase",
+            "description": "Gather and prepare the raw data needed for analysis...",
+            "code": "import pandas as pd\nimport numpy as np\n\n# Load or generate data\ndata = pd.read_csv('data.csv')\nprint('Data loaded successfully')\nprint(f'Shape: {{data.shape}}')\n\n# Save processed data\ndata.to_csv('processed_data.csv', index=False)\nprint('Data saved to processed_data.csv')",
             "status": "pending",
             "order": 1
         }},
         {{
-            "id": "step_2", 
-            "title": "Data Analysis",
-            "description": "Perform core analysis based on research goal...",
-            "code": "print('Analysis complete')",
+            "id": "phase_2", 
+            "title": "Data Processing Phase",
+            "description": "Clean, transform, and structure the data for analysis...",
+            "code": "import pandas as pd\n\n# Load processed data\ndata = pd.read_csv('processed_data.csv')\n\n# Clean and transform data\ncleaned_data = data.dropna()\ncleaned_data['processed_column'] = cleaned_data['original_column'] * 2\n\n# Save cleaned data\ncleaned_data.to_csv('cleaned_data.csv', index=False)\nprint('Data processing complete')",
             "status": "pending",
             "order": 2
+        }},
+        {{
+            "id": "phase_3",
+            "title": "Analysis Phase", 
+            "description": "Perform statistical analysis and modeling...",
+            "code": "import pandas as pd\nimport numpy as np\nfrom scipy import stats\n\n# Load cleaned data\ndata = pd.read_csv('cleaned_data.csv')\n\n# Perform analysis\nresults = data.describe()\nprint('Analysis results:')\nprint(results)\n\n# Save results\nresults.to_csv('analysis_results.csv')\nprint('Analysis complete')",
+            "status": "pending",
+            "order": 3
+        }},
+        {{
+            "id": "phase_4",
+            "title": "Results Phase",
+            "description": "Generate final outputs and visualizations...",
+            "code": "import pandas as pd\nimport matplotlib.pyplot as plt\n\n# Load analysis results\nresults = pd.read_csv('analysis_results.csv')\n\n# Create visualization\nplt.figure(figsize=(10, 6))\nplt.plot(results.index, results['mean'])\nplt.title('Analysis Results')\nplt.savefig('results_plot.png')\nplt.close()\n\nprint('Results generation complete')",
+            "status": "pending",
+            "order": 4
         }}
     ],
     "created_at": "{}",
     "status": "ready"
 }}
 
-Focus on creating executable code that directly addresses the research goal. Every step must have actual Python code."#,
+Focus on creating executable code that directly addresses the research goal. Every phase must have actual Python code and should be self-contained while building on previous phases."#,
         request.goal,
         request.sources.len(),
         request.background_summary,
@@ -4375,6 +4480,698 @@ Focus on generating steps that will provide meaningful insights and move the res
     println!("✅ Generated {} next steps", steps.len());
     
     Ok(serde_json::to_value(steps).unwrap_or_else(|_| serde_json::json!([])))
+}
+
+// ============================================================================
+// STEP-BY-STEP RESEARCH FUNCTIONS
+// ============================================================================
+
+/// Generate Academic Papers - Step 1 of Research Process
+/// 
+/// Generates academic research sources based on the research goal.
+/// This is the first step in the step-by-step research process.
+/// 
+/// FEATURES:
+/// - Academic source identification and summarization
+/// - User feedback integration
+/// - Notebook history context
+/// 
+/// TESTING: See tests::test_generate_academic_papers() (to be added)
+/// CLI TESTING: Use generate_academic_papers command
+/// API TESTING: Call generate_academic_papers endpoint
+#[tauri::command]
+async fn generate_academic_papers(
+    request: GenerateAcademicPapersRequest,
+    state: State<'_, AppState>,
+) -> Result<GenerateAcademicPapersResponse, String> {
+    println!("📚 Generating academic papers for goal: {}", request.goal);
+    
+    // Check if API key is available
+    let has_api_key = state.api_key.lock().unwrap().is_some();
+    
+    if !has_api_key {
+        println!("❌ No API key available - academic paper generation requires a valid OpenAI API key");
+        return Err("Academic paper generation requires a valid OpenAI API key. Please configure your API key first.".to_string());
+    }
+    
+    // Build context from notebook history
+    let history_context = if let Some(history) = &request.notebook_history {
+        format!("\n\nNOTEBOOK HISTORY:\n{}", serde_json::to_string_pretty(history).unwrap_or_else(|_| "[]".to_string()))
+    } else {
+        String::new()
+    };
+    
+    // Build user feedback context
+    let feedback_context = if let Some(feedback) = &request.user_feedback {
+        format!("\n\nUSER FEEDBACK:\n{}", feedback)
+    } else {
+        String::new()
+    };
+    
+    // Generate academic sources using LLM
+    let prompt = format!(
+        r#"Based on this research goal: "{}"
+
+Generate the top 3 most relevant and authoritative ACADEMIC research sources on this subject.
+
+ACADEMIC SOURCES REQUIREMENT: Find the top 3 most relevant and authoritative ACADEMIC research sources (peer-reviewed papers, academic studies, scholarly articles) on this subject. Prioritize academic sources over industry reports or expert analyses. For each source, provide:
+- Title of the academic paper/study
+- Authors and their academic affiliations
+- URL if available (preferably DOI or academic database links)
+- A comprehensive 1-paragraph summary of the key findings, methodology, and relevance to the research goal
+
+Focus on:
+- Recent academic research (within the last 10 years when possible)
+- Peer-reviewed publications
+- Reputable academic institutions
+- Clear methodology and findings
+- Direct relevance to the research goal{}{}
+
+Return ONLY a JSON object:
+{{
+    "sources": [
+        {{
+            "title": "Academic Paper Title",
+            "authors": "Author Names, University/Institution",
+            "url": "https://doi.org/example.com/paper",
+            "summary": "One paragraph summary of key findings, methodology, and relevance to the research goal..."
+        }},
+        {{
+            "title": "Academic Study Title",
+            "authors": "Author Names, University/Institution",
+            "url": "https://doi.org/example.com/study",
+            "summary": "One paragraph summary of key findings, methodology, and relevance to the research goal..."
+        }},
+        {{
+            "title": "Scholarly Article Title",
+            "authors": "Author Names, University/Institution",
+            "url": "https://doi.org/example.com/article",
+            "summary": "One paragraph summary of key findings, methodology, and relevance to the research goal..."
+        }}
+    ]
+}}
+
+Focus on academic rigor and comprehensive research planning."#,
+        request.goal,
+        history_context,
+        feedback_context
+    );
+    
+    let response_json = match cedar::llm::ask_llm(&prompt).await {
+        Ok(json_str) => {
+            match serde_json::from_str::<serde_json::Value>(&json_str) {
+                Ok(json) => json,
+                Err(e) => {
+                    println!("❌ Failed to parse academic papers JSON: {}", e);
+                    return Err(format!("Failed to parse academic papers response: {}", e));
+                }
+            }
+        },
+        Err(e) => {
+            println!("❌ Failed to generate academic papers: {}", e);
+            return Err(format!("Failed to generate academic papers: {}", e));
+        }
+    };
+    
+    // Parse the sources
+    let sources: Vec<ResearchSource> = if let Some(sources_array) = response_json["sources"].as_array() {
+        sources_array.iter().filter_map(|source| {
+            serde_json::from_value::<ResearchSource>(source.clone()).ok()
+        }).collect()
+    } else {
+        println!("❌ No sources found in response");
+        return Err("No academic sources found in response".to_string());
+    };
+    
+    println!("✅ Generated {} academic sources", sources.len());
+    
+    Ok(GenerateAcademicPapersResponse { sources })
+}
+
+/// Generate Abstract - Step 2 of Research Process
+/// 
+/// Generates a comprehensive research abstract based on academic sources.
+/// This is the second step in the step-by-step research process.
+/// 
+/// FEATURES:
+/// - Abstract generation from academic sources
+/// - User feedback integration
+/// - Notebook history context
+/// 
+/// TESTING: See tests::test_generate_abstract() (to be added)
+/// CLI TESTING: Use generate_abstract command
+/// API TESTING: Call generate_abstract endpoint
+#[tauri::command]
+async fn generate_abstract(
+    request: GenerateAbstractRequest,
+    state: State<'_, AppState>,
+) -> Result<GenerateAbstractResponse, String> {
+    println!("📝 Generating abstract for goal: {}", request.goal);
+    
+    // Check if API key is available
+    let has_api_key = state.api_key.lock().unwrap().is_some();
+    
+    if !has_api_key {
+        println!("❌ No API key available - abstract generation requires a valid OpenAI API key");
+        return Err("Abstract generation requires a valid OpenAI API key. Please configure your API key first.".to_string());
+    }
+    
+    // Build context from notebook history
+    let history_context = if let Some(history) = &request.notebook_history {
+        format!("\n\nNOTEBOOK HISTORY:\n{}", serde_json::to_string_pretty(history).unwrap_or_else(|_| "[]".to_string()))
+    } else {
+        String::new()
+    };
+    
+    // Build user feedback context
+    let feedback_context = if let Some(feedback) = &request.user_feedback {
+        format!("\n\nUSER FEEDBACK:\n{}", feedback)
+    } else {
+        String::new()
+    };
+    
+    // Format academic sources for the prompt
+    let sources_text = request.academic_sources.iter()
+        .map(|source| {
+            format!(
+                "- {} by {}\n  Summary: {}\n  URL: {}",
+                source.title,
+                source.authors,
+                source.summary,
+                source.url.as_deref().unwrap_or("Not available")
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("\n\n");
+    
+    // Generate abstract using LLM
+    let prompt = format!(
+        r#"Based on this research goal: "{}"
+
+And these academic sources:
+{}
+
+Generate a comprehensive background summary section (2-3 paragraphs) that synthesizes the key findings from the academic sources and provides context for the research.
+
+BACKGROUND SUMMARY REQUIREMENT: Create a comprehensive background summary section that includes:
+- Current state of knowledge on the topic
+- Key findings from recent academic research
+- Gaps in current understanding
+- Relevance to the research goal
+- Context for why this research is important
+
+The abstract should be:
+- Academic in tone and style
+- Comprehensive but concise (2-3 paragraphs)
+- Well-structured with clear sections
+- Based on the provided academic sources
+- Relevant to the specific research goal{}{}
+
+Return ONLY a JSON object:
+{{
+    "abstract_content": "A comprehensive 2-3 paragraph background summary that synthesizes the key findings from the academic sources and provides context for the research. Include current state of knowledge, key findings from recent academic research, gaps in current understanding, relevance to the research goal, and context for why this research is important."
+}}
+
+Focus on academic rigor and comprehensive research planning."#,
+        request.goal,
+        sources_text,
+        history_context,
+        feedback_context
+    );
+    
+    let response_json = match cedar::llm::ask_llm(&prompt).await {
+        Ok(json_str) => {
+            match serde_json::from_str::<serde_json::Value>(&json_str) {
+                Ok(json) => json,
+                Err(e) => {
+                    println!("❌ Failed to parse abstract JSON: {}", e);
+                    return Err(format!("Failed to parse abstract response: {}", e));
+                }
+            }
+        },
+        Err(e) => {
+            println!("❌ Failed to generate abstract: {}", e);
+            return Err(format!("Failed to generate abstract: {}", e));
+        }
+    };
+    
+    // Parse the abstract content
+    let abstract_content = response_json["abstract_content"]
+        .as_str()
+        .unwrap_or("Failed to generate abstract content")
+        .to_string();
+    
+    println!("✅ Generated abstract ({} characters)", abstract_content.len());
+    
+    Ok(GenerateAbstractResponse { abstract_content })
+}
+
+/// Generate Research Steps - Step 3 of Research Process
+/// 
+/// Generates a structured research plan with steps and expected outcomes.
+/// This is the third step in the step-by-step research process.
+/// 
+/// FEATURES:
+/// - Research plan generation with distinct phases
+/// - Expected outcome specification
+/// - User feedback integration
+/// - Notebook history context
+/// 
+/// TESTING: See tests::test_generate_research_steps() (to be added)
+/// CLI TESTING: Use generate_research_steps command
+/// API TESTING: Call generate_research_steps endpoint
+#[tauri::command]
+async fn generate_research_steps(
+    request: GenerateResearchStepsRequest,
+    state: State<'_, AppState>,
+) -> Result<GenerateResearchStepsResponse, String> {
+    println!("📋 Generating research steps for goal: {}", request.goal);
+    
+    // Check if API key is available
+    let has_api_key = state.api_key.lock().unwrap().is_some();
+    
+    if !has_api_key {
+        println!("❌ No API key available - research steps generation requires a valid OpenAI API key");
+        return Err("Research steps generation requires a valid OpenAI API key. Please configure your API key first.".to_string());
+    }
+    
+    // Build context from notebook history
+    let history_context = if let Some(history) = &request.notebook_history {
+        format!("\n\nNOTEBOOK HISTORY:\n{}", serde_json::to_string_pretty(history).unwrap_or_else(|_| "[]".to_string()))
+    } else {
+        String::new()
+    };
+    
+    // Build user feedback context
+    let feedback_context = if let Some(feedback) = &request.user_feedback {
+        format!("\n\nUSER FEEDBACK:\n{}", feedback)
+    } else {
+        String::new()
+    };
+    
+    // Generate research steps using LLM
+    let prompt = format!(
+        r#"Based on the research goal and collected data, create a structured implementation plan with distinct phases:
+
+RESEARCH GOAL: "{}"
+
+COLLECTED DATA:
+- Academic Sources: {} sources found
+- Abstract: {}
+
+Create a structured implementation plan with these distinct phases:
+
+1. PLAN TITLE: Short, action-oriented title (5 words max)
+2. PLAN DESCRIPTION: Brief overview of the implementation approach
+3. IMPLEMENTATION PHASES: Each phase should be self-contained and build on previous phases
+4. EXPECTED OUTCOME: Clear description of what the final result will be
+
+PHASE STRUCTURE:
+- Each phase should have a clear purpose and deliverables
+- Phases should be: Data Collection → Data Processing → Analysis → Results
+- Each phase should generate data that gets stored in appropriate tabs
+- Each phase should identify required libraries and variables
+
+PHASE REQUIREMENTS:
+Each phase MUST include:
+- Specific, actionable title
+- Clear description of what the code will accomplish
+- Complete, runnable Python code (REQUIRED - cannot be empty)
+- Expected outputs and deliverables
+- What data will be stored and where
+
+DATA STORAGE INSTRUCTIONS:
+- When creating DataFrames, arrays, or other data structures, use descriptive variable names
+- Include print statements to show the data structure and content
+- Use .to_csv(), .to_json(), or similar methods to save data when appropriate
+- Add comments explaining what the data represents
+- Our system will automatically detect and store created data in DuckDB tables
+- Libraries will be automatically detected and added to the Libraries tab
+- Variables will be automatically detected and added to the Variables tab
+
+PHASE EXAMPLES:
+- Phase 1: "Data Collection" - Gather and prepare raw data
+- Phase 2: "Data Processing" - Clean, transform, and structure data
+- Phase 3: "Analysis" - Perform statistical analysis and modeling
+- Phase 4: "Results" - Generate final outputs and visualizations
+
+IMPORTANT: Every phase must have actual Python code that can be executed. Do not leave code fields empty.{}{}
+
+Return ONLY a JSON object:
+{{
+    "steps": [
+        {{
+            "id": "phase_1",
+            "title": "Data Collection Phase",
+            "description": "Gather and prepare the raw data needed for analysis...",
+            "code": "import pandas as pd\nimport numpy as np\n\n# Load or generate data\ndata = pd.read_csv('data.csv')\nprint('Data loaded successfully')\nprint(f'Shape: {{data.shape}}')\n\n# Save processed data\ndata.to_csv('processed_data.csv', index=False)\nprint('Data saved to processed_data.csv')",
+            "status": "pending",
+            "order": 1
+        }},
+        {{
+            "id": "phase_2", 
+            "title": "Data Processing Phase",
+            "description": "Clean, transform, and structure the data for analysis...",
+            "code": "import pandas as pd\n\n# Load processed data\ndata = pd.read_csv('processed_data.csv')\n\n# Clean and transform data\ncleaned_data = data.dropna()\ncleaned_data['processed_column'] = cleaned_data['original_column'] * 2\n\n# Save cleaned data\ncleaned_data.to_csv('cleaned_data.csv', index=False)\nprint('Data processing complete')",
+            "status": "pending",
+            "order": 2
+        }},
+        {{
+            "id": "phase_3",
+            "title": "Analysis Phase", 
+            "description": "Perform statistical analysis and modeling...",
+            "code": "import pandas as pd\nimport numpy as np\nfrom scipy import stats\n\n# Load cleaned data\ndata = pd.read_csv('cleaned_data.csv')\n\n# Perform analysis\nresults = data.describe()\nprint('Analysis results:')\nprint(results)\n\n# Save results\nresults.to_csv('analysis_results.csv')\nprint('Analysis complete')",
+            "status": "pending",
+            "order": 3
+        }},
+        {{
+            "id": "phase_4",
+            "title": "Results Phase",
+            "description": "Generate final outputs and visualizations...",
+            "code": "import pandas as pd\nimport matplotlib.pyplot as plt\n\n# Load analysis results\nresults = pd.read_csv('analysis_results.csv')\n\n# Create visualization\nplt.figure(figsize=(10, 6))\nplt.plot(results.index, results['mean'])\nplt.title('Analysis Results')\nplt.savefig('results_plot.png')\nplt.close()\n\nprint('Results generation complete')",
+            "status": "pending",
+            "order": 4
+        }}
+    ],
+    "expected_outcome": "A comprehensive analysis with visualizations, statistical results, and actionable insights that directly address the research goal."
+}}
+
+Focus on creating executable code that directly addresses the research goal. Every phase must have actual Python code and should be self-contained while building on previous phases."#,
+        request.goal,
+        request.academic_sources.len(),
+        request.abstract_content,
+        history_context,
+        feedback_context
+    );
+    
+    let response_json = match cedar::llm::ask_llm(&prompt).await {
+        Ok(json_str) => {
+            match serde_json::from_str::<serde_json::Value>(&json_str) {
+                Ok(json) => json,
+                Err(e) => {
+                    println!("❌ Failed to parse research steps JSON: {}", e);
+                    return Err(format!("Failed to parse research steps response: {}", e));
+                }
+            }
+        },
+        Err(e) => {
+            println!("❌ Failed to generate research steps: {}", e);
+            return Err(format!("Failed to generate research steps: {}", e));
+        }
+    };
+    
+    // Parse the steps
+    let steps: Vec<ResearchPlanStep> = if let Some(steps_array) = response_json["steps"].as_array() {
+        steps_array.iter().filter_map(|step| {
+            serde_json::from_value::<ResearchPlanStep>(step.clone()).ok()
+        }).collect()
+    } else {
+        println!("❌ No steps found in response");
+        return Err("No research steps found in response".to_string());
+    };
+    
+    // Parse the expected outcome
+    let expected_outcome = response_json["expected_outcome"]
+        .as_str()
+        .unwrap_or("Comprehensive analysis with results and insights")
+        .to_string();
+    
+    println!("✅ Generated {} research steps", steps.len());
+    
+    Ok(GenerateResearchStepsResponse { steps, expected_outcome })
+}
+
+/// Generate Research Step - Individual Step Generation
+/// 
+/// Generates a specific research step with context from previous steps.
+/// This allows for individual step generation with full context.
+/// 
+/// FEATURES:
+/// - Individual step generation with full context
+/// - Previous steps integration
+/// - User feedback integration
+/// - Notebook history context
+/// 
+/// TESTING: See tests::test_generate_research_step() (to be added)
+/// CLI TESTING: Use generate_research_step command
+/// API TESTING: Call generate_research_step endpoint
+#[tauri::command]
+async fn generate_research_step(
+    request: GenerateResearchStepRequest,
+    state: State<'_, AppState>,
+) -> Result<GenerateResearchStepResponse, String> {
+    println!("🔧 Generating research step {}: {}", request.step_index, request.step_title);
+    
+    // Check if API key is available
+    let has_api_key = state.api_key.lock().unwrap().is_some();
+    
+    if !has_api_key {
+        println!("❌ No API key available - research step generation requires a valid OpenAI API key");
+        return Err("Research step generation requires a valid OpenAI API key. Please configure your API key first.".to_string());
+    }
+    
+    // Build context from notebook history
+    let history_context = if let Some(history) = &request.notebook_history {
+        format!("\n\nNOTEBOOK HISTORY:\n{}", serde_json::to_string_pretty(history).unwrap_or_else(|_| "[]".to_string()))
+    } else {
+        String::new()
+    };
+    
+    // Build user feedback context
+    let feedback_context = if let Some(feedback) = &request.user_feedback {
+        format!("\n\nUSER FEEDBACK:\n{}", feedback)
+    } else {
+        String::new()
+    };
+    
+    // Build previous steps context
+    let previous_steps_context = if !request.previous_steps.is_empty() {
+        format!("\n\nPREVIOUS STEPS:\n{}", serde_json::to_string_pretty(&request.previous_steps).unwrap_or_else(|_| "[]".to_string()))
+    } else {
+        String::new()
+    };
+    
+    // Generate the specific step using LLM
+    let prompt = format!(
+        r#"Based on the research goal and context, generate a specific research step:
+
+RESEARCH GOAL: "{}"
+
+STEP INFORMATION:
+- Step Index: {}
+- Step Title: {}
+
+CONTEXT:
+- Academic Sources: {} sources available
+- Abstract: {}
+- Previous Steps: {} completed{}{}{}
+
+Generate a detailed research step that:
+1. Has a clear, actionable title
+2. Provides a comprehensive description of what will be accomplished
+3. Includes complete, runnable Python code
+4. Builds on previous steps and context
+5. Generates data that can be stored and analyzed
+6. Includes proper error handling and logging
+
+The step should:
+- Be self-contained but build on previous work
+- Include all necessary imports
+- Generate meaningful outputs
+- Save data in appropriate formats
+- Include print statements for monitoring progress
+- Handle potential errors gracefully
+
+Return ONLY a JSON object:
+{{
+    "step": {{
+        "id": "step_{}",
+        "title": "Specific Step Title",
+        "description": "Detailed description of what this step will accomplish, including expected inputs, outputs, and methodology...",
+        "code": "import pandas as pd\nimport numpy as np\n\n# Step-specific code here\n# Include all necessary imports and logic\n# Add proper error handling\n# Include print statements for monitoring\n# Save outputs in appropriate formats\n\nprint('Step completed successfully')",
+        "status": "pending",
+        "order": {}
+    }}
+}}
+
+Focus on creating executable code that directly addresses the research goal and builds on previous steps."#,
+        request.goal,
+        request.step_index,
+        request.step_title,
+        request.academic_sources.len(),
+        request.abstract_content,
+        request.previous_steps.len(),
+        previous_steps_context,
+        history_context,
+        feedback_context,
+        request.step_index,
+        request.step_index
+    );
+    
+    let response_json = match cedar::llm::ask_llm(&prompt).await {
+        Ok(json_str) => {
+            match serde_json::from_str::<serde_json::Value>(&json_str) {
+                Ok(json) => json,
+                Err(e) => {
+                    println!("❌ Failed to parse research step JSON: {}", e);
+                    return Err(format!("Failed to parse research step response: {}", e));
+                }
+            }
+        },
+        Err(e) => {
+            println!("❌ Failed to generate research step: {}", e);
+            return Err(format!("Failed to generate research step: {}", e));
+        }
+    };
+    
+    // Parse the step
+    let step = if let Some(step_obj) = response_json["step"].as_object() {
+        match serde_json::from_value::<ResearchPlanStep>(serde_json::Value::Object(step_obj.clone())) {
+            Ok(step) => step,
+            Err(e) => {
+                println!("❌ Failed to parse step object: {}", e);
+                return Err(format!("Failed to parse step object: {}", e));
+            }
+        }
+    } else {
+        println!("❌ No step found in response");
+        return Err("No research step found in response".to_string());
+    };
+    
+    println!("✅ Generated research step: {}", step.title);
+    
+    Ok(GenerateResearchStepResponse { step })
+}
+
+/// Update Research Write-Up - Final Step of Research Process
+/// 
+/// Updates the research write-up based on completed steps and execution results.
+/// This is the final step in the step-by-step research process.
+/// 
+/// FEATURES:
+/// - Comprehensive write-up generation
+/// - Execution results integration
+/// - User feedback integration
+/// - Notebook history context
+/// 
+/// TESTING: See tests::test_update_research_write_up() (to be added)
+/// CLI TESTING: Use update_research_write_up command
+/// API TESTING: Call update_research_write_up endpoint
+#[tauri::command]
+async fn update_research_write_up(
+    request: UpdateResearchWriteUpRequest,
+    state: State<'_, AppState>,
+) -> Result<UpdateResearchWriteUpResponse, String> {
+    println!("📝 Updating research write-up for goal: {}", request.goal);
+    
+    // Check if API key is available
+    let has_api_key = state.api_key.lock().unwrap().is_some();
+    
+    if !has_api_key {
+        println!("❌ No API key available - write-up generation requires a valid OpenAI API key");
+        return Err("Write-up generation requires a valid OpenAI API key. Please configure your API key first.".to_string());
+    }
+    
+    // Build context from notebook history
+    let history_context = if let Some(history) = &request.notebook_history {
+        format!("\n\nNOTEBOOK HISTORY:\n{}", serde_json::to_string_pretty(history).unwrap_or_else(|_| "[]".to_string()))
+    } else {
+        String::new()
+    };
+    
+    // Build user feedback context
+    let feedback_context = if let Some(feedback) = &request.user_feedback {
+        format!("\n\nUSER FEEDBACK:\n{}", feedback)
+    } else {
+        String::new()
+    };
+    
+    // Generate comprehensive write-up using LLM
+    let prompt = format!(
+        r#"Based on the completed research, generate a comprehensive research write-up:
+
+RESEARCH GOAL: "{}"
+
+RESEARCH CONTEXT:
+- Academic Sources: {} sources
+- Abstract: {}
+- Completed Steps: {} steps
+- Execution Results: {} results
+
+Generate a comprehensive research write-up that includes:
+
+1. INTRODUCTION
+   - Research goal and context
+   - Background from academic sources
+   - Research questions and objectives
+
+2. METHODOLOGY
+   - Overview of the research approach
+   - Description of each completed step
+   - Data collection and analysis methods
+
+3. RESULTS
+   - Summary of execution results
+   - Key findings and insights
+   - Data analysis outcomes
+
+4. DISCUSSION
+   - Interpretation of results
+   - Comparison with academic sources
+   - Implications and significance
+
+5. CONCLUSION
+   - Summary of key findings
+   - Answers to research questions
+   - Future research directions
+
+The write-up should be:
+- Academic in tone and style
+- Comprehensive and well-structured
+- Based on actual execution results
+- Integrated with academic sources
+- Clear and accessible{}{}
+
+Return ONLY a JSON object:
+{{
+    "write_up_content": "A comprehensive research write-up including introduction, methodology, results, discussion, and conclusion sections. The write-up should be well-structured, academic in tone, and based on the actual research execution and results."
+}}
+
+Focus on creating a professional, comprehensive research report that effectively communicates the research findings and methodology."#,
+        request.goal,
+        request.academic_sources.len(),
+        request.abstract_content,
+        request.completed_steps.len(),
+        request.execution_results.len(),
+        history_context,
+        feedback_context
+    );
+    
+    let response_json = match cedar::llm::ask_llm(&prompt).await {
+        Ok(json_str) => {
+            match serde_json::from_str::<serde_json::Value>(&json_str) {
+                Ok(json) => json,
+                Err(e) => {
+                    println!("❌ Failed to parse write-up JSON: {}", e);
+                    return Err(format!("Failed to parse write-up response: {}", e));
+                }
+            }
+        },
+        Err(e) => {
+            println!("❌ Failed to generate write-up: {}", e);
+            return Err(format!("Failed to generate write-up: {}", e));
+        }
+    };
+    
+    // Parse the write-up content
+    let write_up_content = response_json["write_up_content"]
+        .as_str()
+        .unwrap_or("Failed to generate write-up content")
+        .to_string();
+    
+    println!("✅ Generated comprehensive write-up ({} characters)", write_up_content.len());
+    
+    Ok(UpdateResearchWriteUpResponse { write_up_content })
 }
 
 #[tauri::command]
@@ -5386,6 +6183,13 @@ fn main() {
             generate_research_plan,
             execute_step,
             generate_next_steps,
+
+            // Step-by-Step Research endpoints
+            generate_academic_papers,
+            generate_abstract,
+            generate_research_steps,
+            generate_research_step,
+            update_research_write_up,
 
             // Visualization Management endpoints
             create_visualization,

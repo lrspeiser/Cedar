@@ -230,7 +230,7 @@ function App() {
           <div className="flex items-center justify-between">
             <div className="flex items-center space-x-4">
               <img 
-                src="/brain.png" 
+                src="/cedar.png" 
                 alt="Cedar Logo" 
                 className="w-8 h-8"
               />

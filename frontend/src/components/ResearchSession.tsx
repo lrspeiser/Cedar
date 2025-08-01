@@ -66,7 +66,7 @@ import CellComponent from './CellComponent';
 
 interface Cell {
   id: string;
-  type: 'goal' | 'initialization' | 'questions' | 'plan' | 'code' | 'result' | 'visualization' | 'writeup' | 'data' | 'reference' | 'variable' | 'library' | 'title' | 'references' | 'abstract' | 'evaluation' | 'results' | 'data_upload' | 'data_analysis' | 'data_metadata' | 'duckdb_query';
+  type: 'goal' | 'initialization' | 'questions' | 'plan' | 'code' | 'result' | 'visualization' | 'writeup' | 'data' | 'reference' | 'variable' | 'library' | 'title' | 'references' | 'abstract' | 'evaluation' | 'results' | 'data_upload' | 'data_analysis' | 'data_metadata' | 'duckdb_query' | 'phase' | 'title_created';
   content: string;
   timestamp: string;
   output?: string;
@@ -464,33 +464,52 @@ const ResearchSession: React.FC<ResearchSessionProps> = ({
     }
   }, [sessionId]);
 
-  // Auto-refresh session when research starts
+  // Auto-refresh session when research starts or when there are active cells
   useEffect(() => {
-    if (isResearchStarting && sessionId) {
-      // Set a small delay to allow the backend to create the session
-      const timer = setTimeout(() => {
-        loadSession();
-      }, 1000);
+    const hasActiveCells = cells.some(cell => cell.status === 'active' || cell.status === 'pending');
+    const shouldPoll = (isResearchStarting || hasActiveCells) && sessionId;
+    
+    if (shouldPoll) {
+      console.log('🔍 Starting/continuing session polling for session:', sessionId, 
+        isResearchStarting ? '(research starting)' : '(active cells)');
+      
+      // Immediate load attempt
+      loadSession();
       
       // Set up polling to check for session updates
       const pollInterval = setInterval(() => {
+        console.log('🔄 Polling for session updates...');
         loadSession();
-      }, 2000); // Check every 2 seconds
+      }, 1500); // Check every 1.5 seconds for faster response
       
       return () => {
-        clearTimeout(timer);
+        console.log('🛑 Stopping session polling');
         clearInterval(pollInterval);
       };
     }
-  }, [isResearchStarting, sessionId]);
+  }, [isResearchStarting, sessionId, cells]);
 
-  // Stop polling when we have cells (session is loaded)
+  // Stop polling when we have cells and research is no longer starting
   useEffect(() => {
     if (cells.length > 0 && isResearchStarting && onSessionLoaded) {
+      console.log('✅ Session loaded with', cells.length, 'cells, stopping research starting state');
       // Session has been loaded, notify parent to stop the research starting state
       onSessionLoaded();
     }
   }, [cells.length, isResearchStarting, onSessionLoaded]);
+
+  // Continue polling while there are active cells
+  useEffect(() => {
+    const hasActiveCells = cells.some(cell => cell.status === 'active' || cell.status === 'pending');
+    
+    if (hasActiveCells) {
+      console.log('🔄 Found active cells, continuing to poll for updates...');
+      // The polling will continue in the main useEffect
+    } else if (cells.length > 0) {
+      console.log('✅ All cells completed, stopping polling');
+      // All cells are done, we can stop polling
+    }
+  }, [cells]);
 
   // Persist execution threads when component unmounts or session changes
   useEffect(() => {
@@ -512,7 +531,10 @@ const ResearchSession: React.FC<ResearchSessionProps> = ({
 
   const loadSession = async () => {
     try {
+      console.log('📥 Loading session:', sessionId);
       const session = await apiService.loadSession(sessionId) as any;
+      console.log('📦 Session loaded:', session ? 'found' : 'not found', session?.cells?.length || 0, 'cells');
+      
       if (session && session.cells) {
         // Reset any stuck cells (active or pending status that shouldn't be)
         const cleanedCells = session.cells.map((cell: Cell) => {
@@ -717,15 +739,62 @@ const ResearchSession: React.FC<ResearchSessionProps> = ({
           nextCell = await generateInitializationCell(currentCell.content);
           break;
           
+        case 'title_created':
+          // Start research initialization
+          nextCell = await generateInitializationCell(currentCell.content);
+          break;
+          
         case 'initialization':
+          // If this is the first initialization cell (from backend), generate the actual research
+          if (currentCell.metadata?.goal && !currentCell.metadata?.background_summary) {
+            nextCell = await generateInitializationCell(currentCell.metadata.goal);
+          } else {
+            // Generate abstract cell using the background summary from initialization
+            const backgroundSummary = currentCell.metadata?.background_summary;
+            if (backgroundSummary) {
+              nextCell = await generateAbstractCell(goal, backgroundSummary);
+            } else {
+              console.error('No background summary found in initialization cell');
+            }
+          }
+          break;
+          
+        
+          
+        case 'abstract':
           // Skip questions, go directly to plan
           nextCell = await generatePlanCell({});
           break;
           
         case 'plan':
-          // Generate first execution cell
+          // Generate first phase cell
           if (currentCell.metadata?.plan) {
-            nextCell = await generateFirstExecutionCell(currentCell.metadata.plan);
+            nextCell = await generatePhaseCell(currentCell.metadata.plan, 0);
+          }
+          break;
+          
+        case 'phase':
+          // Generate execution cell for this phase
+          if (currentCell.metadata?.plan) {
+            const phaseIndex = currentCell.metadata.stepOrder || 0;
+            const phase = currentCell.metadata.plan.steps[phaseIndex];
+            if (phase) {
+              nextCell = {
+                id: `code-${phase.id}`,
+                type: 'code',
+                content: phase.code || `# ${phase.title}\n${phase.description}`,
+                timestamp: new Date().toISOString(),
+                status: 'active',
+                requiresUserAction: true,
+                canProceed: true,
+                metadata: {
+                  stepId: phase.id,
+                  stepOrder: phaseIndex,
+                  totalSteps: currentCell.metadata.plan.steps.length,
+                  phase: phase,
+                },
+              };
+            }
           }
           break;
           
@@ -795,6 +864,11 @@ const ResearchSession: React.FC<ResearchSessionProps> = ({
           updatedCell = await generateInitializationCellWithComment(currentCell.content, comment);
           break;
           
+        case 'abstract':
+          // Regenerate abstract with comment
+          updatedCell = await generateAbstractCellWithComment(goal, currentCell.metadata?.background_summary || '', comment);
+          break;
+          
         case 'plan':
           // Regenerate plan with comment
           updatedCell = await generatePlanCellWithComment({}, comment);
@@ -844,20 +918,20 @@ const ResearchSession: React.FC<ResearchSessionProps> = ({
   const generateInitializationCell = async (goal: string): Promise<Cell> => {
     const initialization = await apiService.initializeResearch({ goal }) as any;
     
-    // Store the background summary as an abstract in the write-up tab
-    if (initialization.background_summary) {
+    // Store references in the references tab
+    if (initialization.sources && initialization.sources.length > 0) {
       try {
-        await dataRouter.routeWriteUp(`# Abstract\n\n${initialization.background_summary}`);
-        console.log('✅ Abstract stored in write-up tab');
+        await dataRouter.routeReferences(initialization.sources);
+        console.log('✅ References stored in references tab');
       } catch (error) {
-        console.error('Failed to store abstract:', error);
+        console.error('Failed to store references:', error);
       }
     }
     
     return {
       id: `initialization-${Date.now()}`,
       type: 'initialization',
-      content: `Research Initialization for: ${goal}\n\n${initialization.background_summary}`,
+      content: `Research Initialization for: ${goal}\n\nFound ${initialization.sources?.length || 0} relevant research sources.`,
       timestamp: new Date().toISOString(),
       status: 'completed',
       requiresUserAction: false,
@@ -866,6 +940,31 @@ const ResearchSession: React.FC<ResearchSessionProps> = ({
         references: initialization.sources,
         questions: initialization.questions,
         background_summary: initialization.background_summary,
+      },
+    };
+  };
+
+  const generateAbstractCell = async (goal: string, backgroundSummary: string): Promise<Cell> => {
+    // Store the background summary as an abstract in the write-up tab
+    if (backgroundSummary) {
+      try {
+        await dataRouter.routeWriteUp(`# Abstract\n\n${backgroundSummary}`);
+        console.log('✅ Abstract stored in write-up tab');
+      } catch (error) {
+        console.error('Failed to store abstract:', error);
+      }
+    }
+    
+    return {
+      id: `abstract-${Date.now()}`,
+      type: 'abstract',
+      content: `Research Abstract for: ${goal}\n\n${backgroundSummary}`,
+      timestamp: new Date().toISOString(),
+      status: 'completed',
+      requiresUserAction: false,
+      canProceed: true,
+      metadata: {
+        background_summary: backgroundSummary,
       },
     };
   };
@@ -883,13 +982,41 @@ const ResearchSession: React.FC<ResearchSessionProps> = ({
     return {
       id: `plan-${Date.now()}`,
       type: 'plan',
-      content: `Research Plan: ${plan.title}\n\n${plan.description}\n\nSteps:\n${plan.steps.map((step: any, i: number) => `${i + 1}. ${step.title}`).join('\n')}`,
+      content: `Research Plan: ${plan.title}\n\n${plan.description}\n\nPhases:\n${plan.steps.map((step: any, i: number) => `${i + 1}. ${step.title}`).join('\n')}`,
       timestamp: new Date().toISOString(),
       status: 'completed',
       requiresUserAction: false,
       canProceed: true,
       metadata: {
         plan,
+      },
+    };
+  };
+
+  const generatePhaseCell = async (plan: any, phaseIndex: number): Promise<Cell> => {
+    if (!plan || !plan.steps || plan.steps.length === 0) {
+      throw new Error('No research plan available');
+    }
+    
+    if (phaseIndex >= plan.steps.length) {
+      throw new Error('Phase index out of bounds');
+    }
+    
+    const phase = plan.steps[phaseIndex];
+    
+    return {
+      id: `phase-${phase.id}`,
+      type: 'phase',
+      content: `Phase ${phaseIndex + 1}: ${phase.title}\n\n${phase.description}\n\nHere is what we will do:\n- ${phase.description}\n- The data we will need: Based on previous phases and research context\n- Example output we will get: ${phase.description.split('.').slice(0, 2).join('.')}...`,
+      timestamp: new Date().toISOString(),
+      status: 'completed',
+      requiresUserAction: false,
+      canProceed: true,
+      metadata: {
+        stepId: phase.id,
+        stepOrder: phaseIndex,
+        totalSteps: plan.steps.length,
+        phase: phase,
       },
     };
   };
@@ -1033,6 +1160,14 @@ const ResearchSession: React.FC<ResearchSessionProps> = ({
       sessionId,
     });
     
+    // Enhance the result with the code that was executed
+    const enhancedResult = {
+      ...result,
+      code: codeCell.content, // Include the code that was executed
+      stepNumber: (codeCell.metadata?.stepOrder || 0) + 1,
+      stepTitle: codeCell.metadata?.stepId || 'Code Execution',
+    };
+    
     // Generate result cell
     const stepNumber = (codeCell.metadata?.stepOrder || 0) + 1;
     const resultCell: Cell = {
@@ -1044,7 +1179,7 @@ const ResearchSession: React.FC<ResearchSessionProps> = ({
       requiresUserAction: false,
       canProceed: true,
       metadata: {
-        executionResults: [result],
+        executionResults: [enhancedResult],
         stepOrder: codeCell.metadata?.stepOrder || 0,
         totalSteps: codeCell.metadata?.totalSteps || 0,
         threadId, // Store thread ID for reference
@@ -1052,7 +1187,7 @@ const ResearchSession: React.FC<ResearchSessionProps> = ({
     };
 
     // Complete the execution thread
-    completeExecutionThread(threadId, [result]);
+    completeExecutionThread(threadId, [enhancedResult]);
     
     return resultCell;
   };
@@ -1079,21 +1214,22 @@ const ResearchSession: React.FC<ResearchSessionProps> = ({
     const totalSteps = resultCell.metadata?.totalSteps || 0;
     
     if (currentStep < totalSteps - 1) {
-      // Generate next code step
+      // Generate next phase cell
       const nextStep = researchPlan?.steps[currentStep + 1];
       if (nextStep) {
         return {
-          id: `code-${nextStep.id}`,
-          type: 'code',
-          content: nextStep.code || `# ${nextStep.title}\n${nextStep.description}`,
+          id: `phase-${nextStep.id}`,
+          type: 'phase',
+          content: `Phase ${currentStep + 2}: ${nextStep.title}\n\n${nextStep.description}\n\nHere is what we will do:\n- ${nextStep.description}\n- The data we will need: Based on previous phases and research context\n- Example output we will get: ${nextStep.description.split('.').slice(0, 2).join('.')}...`,
           timestamp: new Date().toISOString(),
-          status: 'active',
-          requiresUserAction: true,
+          status: 'completed',
+          requiresUserAction: false,
           canProceed: true,
           metadata: {
             stepId: nextStep.id,
             stepOrder: currentStep + 1,
             totalSteps,
+            phase: nextStep,
           },
         };
       }
@@ -1142,20 +1278,20 @@ const ResearchSession: React.FC<ResearchSessionProps> = ({
     const enhancedGoal = `${goal}\n\nUser Comment: ${comment}\n\nPlease consider this feedback when generating the research initialization.`;
     const initialization = await apiService.initializeResearch({ goal: enhancedGoal }) as any;
     
-    // Store the background summary as an abstract in the write-up tab
-    if (initialization.background_summary) {
+    // Store references in the references tab
+    if (initialization.sources && initialization.sources.length > 0) {
       try {
-        await dataRouter.routeWriteUp(`# Abstract (Updated)\n\n${initialization.background_summary}`);
-        console.log('✅ Updated abstract stored in write-up tab');
+        await dataRouter.routeReferences(initialization.sources);
+        console.log('✅ Updated references stored in references tab');
       } catch (error) {
-        console.error('Failed to store updated abstract:', error);
+        console.error('Failed to store updated references:', error);
       }
     }
     
     return {
       id: `initialization-${Date.now()}`,
       type: 'initialization',
-      content: `Research Initialization (Updated) for: ${goal}\n\nUser Feedback: ${comment}\n\n${initialization.background_summary}`,
+      content: `Research Initialization (Updated) for: ${goal}\n\nUser Feedback: ${comment}\n\nFound ${initialization.sources?.length || 0} relevant research sources.`,
       timestamp: new Date().toISOString(),
       status: 'completed',
       requiresUserAction: false,
@@ -1164,6 +1300,32 @@ const ResearchSession: React.FC<ResearchSessionProps> = ({
         references: initialization.sources,
         questions: initialization.questions,
         background_summary: initialization.background_summary,
+      },
+    };
+  };
+
+  const generateAbstractCellWithComment = async (goal: string, backgroundSummary: string, comment: string): Promise<Cell> => {
+    // Enhance the background summary with user comment
+    const enhancedSummary = `${backgroundSummary}\n\nUser Feedback: ${comment}\n\nPlease consider this feedback when refining the abstract.`;
+    
+    // Store the enhanced background summary as an abstract in the write-up tab
+    try {
+      await dataRouter.routeWriteUp(`# Abstract (Updated)\n\n${enhancedSummary}`);
+      console.log('✅ Updated abstract stored in write-up tab');
+    } catch (error) {
+      console.error('Failed to store updated abstract:', error);
+    }
+    
+    return {
+      id: `abstract-${Date.now()}`,
+      type: 'abstract',
+      content: `Research Abstract (Updated) for: ${goal}\n\nUser Feedback: ${comment}\n\n${enhancedSummary}`,
+      timestamp: new Date().toISOString(),
+      status: 'completed',
+      requiresUserAction: false,
+      canProceed: true,
+      metadata: {
+        background_summary: enhancedSummary,
       },
     };
   };
@@ -1205,6 +1367,15 @@ const ResearchSession: React.FC<ResearchSessionProps> = ({
       sessionId,
     });
     
+    // Enhance the result with the code that was executed
+    const enhancedResult = {
+      ...result,
+      code: enhancedCode, // Include the enhanced code that was executed
+      stepNumber: (codeCell.metadata?.stepOrder || 0) + 1,
+      stepTitle: codeCell.metadata?.stepId || 'Code Execution (Updated)',
+      userComment: comment,
+    };
+    
     // Generate result cell
     const stepNumber = (codeCell.metadata?.stepOrder || 0) + 1;
     const resultCell: Cell = {
@@ -1216,7 +1387,7 @@ const ResearchSession: React.FC<ResearchSessionProps> = ({
       requiresUserAction: false,
       canProceed: true,
       metadata: {
-        executionResults: [result],
+        executionResults: [enhancedResult],
         stepOrder: codeCell.metadata?.stepOrder || 0,
         totalSteps: codeCell.metadata?.totalSteps || 0,
         threadId,
@@ -1224,7 +1395,7 @@ const ResearchSession: React.FC<ResearchSessionProps> = ({
     };
 
     // Complete the execution thread
-    completeExecutionThread(threadId, [result]);
+    completeExecutionThread(threadId, [enhancedResult]);
 
     return resultCell;
   };

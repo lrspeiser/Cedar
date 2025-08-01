@@ -1188,6 +1188,107 @@ class ApiService {
     }
   }
 
+  // ============================================================================
+  // STEP-BY-STEP RESEARCH METHODS
+  // ============================================================================
+
+  async generateAcademicPapers(request: {
+    goal: string;
+    notebookHistory?: any[];
+    userFeedback?: string;
+  }) {
+    console.log('📚 Calling Tauri backend: generate_academic_papers', request);
+    
+    try {
+      const result = await invoke('generate_academic_papers', { request });
+      console.log('✅ Backend academic papers generated successfully');
+      return result;
+    } catch (error) {
+      console.error('❌ Backend error generating academic papers:', error);
+      throw error;
+    }
+  }
+
+  async generateAbstract(request: {
+    goal: string;
+    academicSources: any[];
+    notebookHistory?: any[];
+    userFeedback?: string;
+  }) {
+    console.log('📝 Calling Tauri backend: generate_abstract', request);
+    
+    try {
+      const result = await invoke('generate_abstract', { request });
+      console.log('✅ Backend abstract generated successfully');
+      return result;
+    } catch (error) {
+      console.error('❌ Backend error generating abstract:', error);
+      throw error;
+    }
+  }
+
+  async generateResearchSteps(request: {
+    goal: string;
+    academicSources: any[];
+    abstractContent: string;
+    notebookHistory?: any[];
+    userFeedback?: string;
+  }) {
+    console.log('📋 Calling Tauri backend: generate_research_steps', request);
+    
+    try {
+      const result = await invoke('generate_research_steps', { request });
+      console.log('✅ Backend research steps generated successfully');
+      return result;
+    } catch (error) {
+      console.error('❌ Backend error generating research steps:', error);
+      throw error;
+    }
+  }
+
+  async generateResearchStep(request: {
+    goal: string;
+    stepIndex: number;
+    stepTitle: string;
+    academicSources: any[];
+    abstractContent: string;
+    previousSteps: any[];
+    notebookHistory?: any[];
+    userFeedback?: string;
+  }) {
+    console.log('🔧 Calling Tauri backend: generate_research_step', request);
+    
+    try {
+      const result = await invoke('generate_research_step', { request });
+      console.log('✅ Backend research step generated successfully');
+      return result;
+    } catch (error) {
+      console.error('❌ Backend error generating research step:', error);
+      throw error;
+    }
+  }
+
+  async updateResearchWriteUp(request: {
+    goal: string;
+    academicSources: any[];
+    abstractContent: string;
+    completedSteps: any[];
+    executionResults: any[];
+    notebookHistory?: any[];
+    userFeedback?: string;
+  }) {
+    console.log('📝 Calling Tauri backend: update_research_write_up', request);
+    
+    try {
+      const result = await invoke('update_research_write_up', { request });
+      console.log('✅ Backend research write-up updated successfully');
+      return result;
+    } catch (error) {
+      console.error('❌ Backend error updating research write-up:', error);
+      throw error;
+    }
+  }
+
   async generateVisualization(request: {
     projectId: string;
     data: any[];

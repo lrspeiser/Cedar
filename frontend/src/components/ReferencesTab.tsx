@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { BookOpen } from 'lucide-react';
 import { apiService } from '../api';
 
 interface Reference {
@@ -147,9 +148,7 @@ const ReferencesTab: React.FC<ReferencesTabProps> = ({ projectId, references, on
       {references.length === 0 ? (
         <div className="text-center py-8">
           <div className="text-gray-400 mb-4">
-            <svg className="w-16 h-16 mx-auto" fill="currentColor" viewBox="0 0 20 20">
-              <path d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
-            </svg>
+            <BookOpen className="w-16 h-16 mx-auto" />
           </div>
           <p className="text-gray-600">No references yet. Add sources and citations to your project!</p>
         </div>
@@ -161,9 +160,7 @@ const ReferencesTab: React.FC<ReferencesTabProps> = ({ projectId, references, on
                 <div className="flex-1">
                   <div className="flex items-center space-x-2 mb-2">
                     <div className="text-purple-500">
-                      <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 20 20">
-                        <path d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
-                      </svg>
+                      <BookOpen className="w-5 h-5" />
                     </div>
                     <h4 className="font-semibold text-gray-800">{reference.title}</h4>
                   </div>
