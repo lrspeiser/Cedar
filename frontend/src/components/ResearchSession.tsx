@@ -713,6 +713,9 @@ const ResearchSession: React.FC<ResearchSessionProps> = ({
   };
 
   const handleNextStep = async (currentCell: Cell) => {
+    console.log('🔍 handleNextStep called for cell:', currentCell.id, 'type:', currentCell.type);
+    console.log('🔍 Cell metadata:', currentCell.metadata);
+    
     // Prevent multiple simultaneous executions
     if (isLoading) {
       console.log('Already processing, please wait...');
@@ -774,10 +777,13 @@ const ResearchSession: React.FC<ResearchSessionProps> = ({
           break;
           
         case 'phase':
+          console.log('🔍 Processing phase cell');
           // Generate execution cell for this phase
           if (currentCell.metadata?.plan) {
+            console.log('🔍 Plan found in metadata:', currentCell.metadata.plan);
             const phaseIndex = currentCell.metadata.stepOrder || 0;
             const phase = currentCell.metadata.plan.steps[phaseIndex];
+            console.log('🔍 Phase index:', phaseIndex, 'Phase:', phase);
             if (phase) {
               nextCell = {
                 id: `code-${phase.id}`,
@@ -794,7 +800,11 @@ const ResearchSession: React.FC<ResearchSessionProps> = ({
                   phase: phase,
                 },
               };
+            } else {
+              console.error('❌ Phase not found at index:', phaseIndex);
             }
+          } else {
+            console.error('❌ No plan found in phase cell metadata');
           }
           break;
           
@@ -1017,6 +1027,7 @@ const ResearchSession: React.FC<ResearchSessionProps> = ({
         stepOrder: phaseIndex,
         totalSteps: plan.steps.length,
         phase: phase,
+        plan: plan,
       },
     };
   };
@@ -1230,6 +1241,7 @@ const ResearchSession: React.FC<ResearchSessionProps> = ({
             stepOrder: currentStep + 1,
             totalSteps,
             phase: nextStep,
+            plan: researchPlan,
           },
         };
       }
