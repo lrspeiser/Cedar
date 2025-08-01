@@ -15,6 +15,8 @@ interface Project {
   variables: any[];
   questions: any[];
   libraries: any[];
+  session_id?: string;
+  session_status?: string;
   researchAnswers?: Record<string, string>;
   researchInitialization?: any;
 }
@@ -95,6 +97,34 @@ export const ProjectManager: React.FC<ProjectManagerProps> = ({ onProjectSelect,
       
       // Auto-select the new project
       onProjectSelect(projectWithAnswers);
+      
+      // Automatically start research with the answers
+      try {
+        const sessionId = `session_${newProject.id}`;
+        
+        const response = await apiService.startResearch({
+          projectId: newProject.id,
+          sessionId: sessionId,
+          goal: goal,
+          answers: answers
+        });
+
+        const responseData = response as any;
+        if (responseData.cells) {
+          // Research started successfully - update the project with session info
+          const projectWithSession = {
+            ...projectWithAnswers,
+            session_id: sessionId,
+            session_status: 'active'
+          };
+          
+          // Update the project selection with session data
+          onProjectSelect(projectWithSession);
+        }
+      } catch (error) {
+        console.error('Failed to auto-start research:', error);
+        // Don't fail the project creation, just log the error
+      }
     } catch (error) {
       console.error('Failed to create project:', error);
       alert('Failed to create project');

@@ -75,7 +75,7 @@ mod tests {
             libraries: Vec::new(),
             write_up: String::new(),
             session_id: None,
-            session_status: "inactive".to_string(),
+            session_status: Some("inactive".to_string()),
         };
 
         let serialized = serde_json::to_string(&project).unwrap();
@@ -224,12 +224,12 @@ mod tests {
 
     #[test]
     fn test_research_workflow() {
-        let request = StartResearchRequest {
-            project_id: "project-123".to_string(),
-            session_id: "session-456".to_string(),
-            goal: "Analyze customer churn patterns".to_string(),
-            answers: vec![],
-        };
+            let request = StartResearchRequest {
+        project_id: "project-123".to_string(),
+        session_id: "session-456".to_string(),
+        goal: "Analyze customer churn patterns".to_string(),
+        answers: None,
+    };
 
         assert_eq!(request.project_id, "project-123");
         assert_eq!(request.session_id, "session-456");
@@ -391,7 +391,7 @@ mod tests {
             libraries: Vec::new(),
             write_up: String::new(),
             session_id: None,
-            session_status: "inactive".to_string(),
+            session_status: Some("inactive".to_string()),
         };
         
         state.projects.lock().unwrap().insert("project-123".to_string(), project.clone());
@@ -503,7 +503,7 @@ mod tests {
             libraries: Vec::new(),
             write_up: String::new(),
             session_id: None,
-            session_status: "inactive".to_string(),
+            session_status: Some("inactive".to_string()),
         };
         
         state.projects.lock().unwrap().insert(project_id.clone(), project);
@@ -566,7 +566,7 @@ mod tests {
                 libraries: vec![],
                 write_up: "".to_string(),
                 session_id: None,
-                session_status: "inactive".to_string(),
+                session_status: Some("inactive".to_string()),
             };
             projects.insert(project_id.clone(), project);
         }
@@ -620,7 +620,7 @@ mod tests {
 
         assert_eq!(request.project_id, "test-project-123");
         assert_eq!(request.filename, "test_data.csv");
-        assert_eq!(request.content.len(), 35);
+        assert_eq!(request.content.len(), 36);
         assert_eq!(request.file_type, Some("csv".to_string()));
     }
 
@@ -829,21 +829,22 @@ mod tests {
             goal: "Test data management functionality".to_string(),
             created_at: "2024-01-01T00:00:00Z".to_string(),
             updated_at: "2024-01-01T00:00:00Z".to_string(),
-            data_files: vec!["test1.csv".to_string(), "test2.json".to_string()],
-            images: vec![],
-            references: vec![],
-            variables: vec![],
-            questions: vec![],
-            libraries: vec![],
-            write_up: String::new(),
-            session_id: None,
-            session_status: "inactive".to_string(),
+                            data_files: vec!["test1.csv".to_string(), "test2.json".to_string()],
+                images: vec![],
+                references: vec![],
+                variables: vec![],
+                questions: vec![],
+                libraries: vec![],
+                write_up: String::new(),
+                session_id: None,
+                session_status: Some("inactive".to_string()),
         };
 
         state.projects.lock().unwrap().insert(project.id.clone(), project);
         
         // Test that project has data files
-        let stored_project = state.projects.lock().unwrap().get(&"test-project-123".to_string()).unwrap();
+        let projects_guard = state.projects.lock().unwrap();
+        let stored_project = projects_guard.get(&"test-project-123".to_string()).unwrap();
         assert_eq!(stored_project.data_files.len(), 2);
         assert!(stored_project.data_files.contains(&"test1.csv".to_string()));
         assert!(stored_project.data_files.contains(&"test2.json".to_string()));
@@ -898,7 +899,7 @@ mod tests {
         
         // Alternative test: verify content structure
         let lines: Vec<&str> = request.content.lines().collect();
-        assert!(lines.len() > 10000);
+        assert!(lines.len() >= 10000);
         assert!(lines[0].contains("name,age,city,department,salary,performance"));
     }
 

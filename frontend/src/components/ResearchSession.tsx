@@ -115,17 +115,27 @@ const ResearchSession: React.FC<ResearchSessionProps> = ({
   // Save session whenever cells change
   useEffect(() => {
     if (cells.length > 0) {
+      console.log('💾 Saving session with', cells.length, 'cells');
       saveSession(cells);
     }
   }, [cells]);
 
-  // Manage execution monitoring
+  // Manage execution monitoring and periodic session saving
   useEffect(() => {
     let monitoringInterval: number | null = null;
+    let saveInterval: number | null = null;
     
     // Start monitoring if execution is in progress
     if (executionProgress.isExecuting) {
       monitoringInterval = monitorExecutionProgress();
+    }
+    
+    // Periodic session saving every 30 seconds if we have cells
+    if (cells.length > 0) {
+      saveInterval = window.setInterval(() => {
+        console.log('⏰ Periodic session save');
+        saveSession(cells);
+      }, 30000); // 30 seconds
     }
     
     // Cleanup function
@@ -133,17 +143,28 @@ const ResearchSession: React.FC<ResearchSessionProps> = ({
       if (monitoringInterval) {
         clearInterval(monitoringInterval);
       }
+      if (saveInterval) {
+        clearInterval(saveInterval);
+      }
     };
-  }, [executionProgress.isExecuting, sessionId]);
+  }, [executionProgress.isExecuting, sessionId, cells]);
 
   const loadSession = async () => {
     try {
+      console.log('🔄 Loading session:', sessionId);
       const sessionData = await apiService.loadSession(sessionId);
+      
       if (sessionData) {
         const sessionDataAny = sessionData as any;
+        console.log('✅ Session loaded:', {
+          hasPlanCells: !!sessionDataAny.plan_cells,
+          planCellsCount: sessionDataAny.plan_cells?.length || 0,
+          status: sessionDataAny.status,
+          hasExecutionResults: !!sessionDataAny.execution_results
+        });
         
         // Load cells from plan_cells (which now includes executed cells with outputs)
-        if (sessionDataAny.plan_cells) {
+        if (sessionDataAny.plan_cells && sessionDataAny.plan_cells.length > 0) {
           const cellsFromSession = sessionDataAny.plan_cells.map((cell: any) => ({
             type: cell.cell_type === 'Code' ? 'code' : 'text',
             content: cell.content,
@@ -152,6 +173,7 @@ const ResearchSession: React.FC<ResearchSessionProps> = ({
             status: cell.execution_result ? 'completed' : 'pending'
           }));
           setCells(cellsFromSession);
+          console.log('📝 Loaded', cellsFromSession.length, 'cells from session');
         }
         
         // Update execution progress if available
@@ -164,9 +186,22 @@ const ResearchSession: React.FC<ResearchSessionProps> = ({
             isExecuting: sessionDataAny.status === 'executing'
           }));
         }
+      } else {
+        console.log('📭 No session data found for:', sessionId);
+        if (answers && Object.keys(answers).length > 0) {
+          // No session exists but we have research answers - auto-start research
+          console.log('🚀 Auto-starting research with answers');
+          await handleSubmitGoal();
+        }
       }
     } catch (error) {
-      console.error('Failed to load session:', error);
+      console.error('❌ Failed to load session:', error);
+      
+      // If session loading fails but we have answers, try to start research
+      if (answers && Object.keys(answers).length > 0) {
+        console.log('🚀 Auto-starting research after session load failure');
+        await handleSubmitGoal();
+      }
     }
   };
 
@@ -185,16 +220,19 @@ const ResearchSession: React.FC<ResearchSessionProps> = ({
         }
       }));
 
-      await apiService.saveSession(sessionId, {
+      const sessionData = {
         project_id: projectId,
         goal: currentGoal,
         plan_cells: cellsJson,
         status: executionProgress.isExecuting ? 'executing' : 'completed',
         execution_results: executionProgress.stepResults,
         updated_at: new Date().toISOString()
-      });
+      };
+
+      await apiService.saveSession(sessionId, sessionData);
+      console.log('✅ Session saved successfully');
     } catch (error) {
-      console.error('Failed to save session:', error);
+      console.error('❌ Failed to save session:', error);
     }
   };
 

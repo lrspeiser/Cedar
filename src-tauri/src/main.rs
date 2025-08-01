@@ -551,6 +551,204 @@ async fn categorize_code_output(
 ) -> Result<(), String> {
     println!("🔍 Backend: Categorizing code output into project tabs");
     
+    // Parse LLM output for categorization headers
+    let categorized_outputs = parse_llm_output_for_categorization(code, output);
+    
+    for categorized_output in &categorized_outputs {
+        match categorized_output.category.as_str() {
+            "data" => {
+                println!("📊 Backend: Processing data output: {}", categorized_output.filename);
+                save_file_helper(SaveFileRequest {
+                    project_id: project_id.to_string(),
+                    filename: categorized_output.filename.clone(),
+                    content: categorized_output.content.clone(),
+                    file_type: "data".to_string(),
+                }, state).await?;
+                println!("✅ Backend: Added data to project");
+            },
+            "visualization" => {
+                println!("🖼️ Backend: Processing visualization output: {}", categorized_output.filename);
+                // Try to parse as Vega-Lite or Plotly JSON
+                if let Ok(visualization_data) = serde_json::from_str::<serde_json::Value>(&categorized_output.content) {
+                    // Create visualization
+                    let visualization = storage::Visualization::new(
+                        categorized_output.filename.replace(".json", ""),
+                        "vega-lite".to_string(),
+                        categorized_output.description.clone(),
+                        categorized_output.content.clone(),
+                        project_id.to_string(),
+                        None
+                    );
+                    
+                    if let Err(e) = storage::save_visualization(&visualization) {
+                        println!("⚠️ Failed to save visualization: {}", e);
+                    } else {
+                        // Add to project images
+                        let mut projects = state.projects.lock().unwrap();
+                        if let Some(project) = projects.get_mut(project_id) {
+                            project.images.push(visualization.id.clone());
+                            if let Err(e) = save_project(project) {
+                                println!("⚠️ Failed to update project with visualization: {}", e);
+                            }
+                        }
+                        println!("✅ Backend: Added visualization to project");
+                    }
+                } else {
+                    // Save as regular image file
+                    save_file_helper(SaveFileRequest {
+                        project_id: project_id.to_string(),
+                        filename: categorized_output.filename.clone(),
+                        content: categorized_output.content.clone(),
+                        file_type: "image".to_string(),
+                    }, state).await?;
+                    println!("✅ Backend: Added image to project");
+                }
+            },
+            "analysis" => {
+                println!("📈 Backend: Processing analysis output: {}", categorized_output.filename);
+                save_file_helper(SaveFileRequest {
+                    project_id: project_id.to_string(),
+                    filename: categorized_output.filename.clone(),
+                    content: categorized_output.content.clone(),
+                    file_type: "write_up".to_string(),
+                }, state).await?;
+                println!("✅ Backend: Added analysis to write-up");
+            },
+            "code" => {
+                println!("💻 Backend: Processing code output: {}", categorized_output.filename);
+                save_file_helper(SaveFileRequest {
+                    project_id: project_id.to_string(),
+                    filename: categorized_output.filename.clone(),
+                    content: categorized_output.content.clone(),
+                    file_type: "code".to_string(),
+                }, state).await?;
+                println!("✅ Backend: Added code to project");
+            },
+            "reference" => {
+                println!("📚 Backend: Processing reference output: {}", categorized_output.filename);
+                // Parse reference data and add to project
+                if let Ok(reference_data) = serde_json::from_str::<serde_json::Value>(&categorized_output.content) {
+                    let reference = Reference {
+                        id: uuid::Uuid::new_v4().to_string(),
+                        title: reference_data["title"].as_str().unwrap_or("Unknown").to_string(),
+                        authors: reference_data["authors"].as_str().unwrap_or("Unknown").to_string(),
+                        url: reference_data["url"].as_str().map(|s| s.to_string()),
+                        content: categorized_output.content.clone(),
+                        added_at: chrono::Utc::now().to_rfc3339(),
+                    };
+                    
+                    add_reference_helper(project_id.to_string(), reference, state).await?;
+                    println!("✅ Backend: Added reference to project");
+                }
+            },
+            _ => {
+                println!("⚠️ Backend: Unknown category '{}' for file: {}", categorized_output.category, categorized_output.filename);
+            }
+        }
+    }
+    
+    // Fallback categorization for legacy code
+    if categorized_outputs.is_empty() {
+        categorize_legacy_output(code, output, project_id, state).await?;
+    }
+    
+    Ok(())
+}
+
+/// Parse LLM output for categorization headers
+fn parse_llm_output_for_categorization(code: &str, output: &str) -> Vec<CategorizedOutput> {
+    let mut categorized_outputs = Vec::new();
+    let lines: Vec<&str> = code.lines().collect();
+    let mut current_category: Option<String> = None;
+    let mut current_description: Option<String> = None;
+    let mut current_filename: Option<String> = None;
+    let mut current_content = String::new();
+    let mut in_categorized_block = false;
+    
+    for line in lines {
+        let line = line.trim();
+        
+        // Check for category header
+        if line.starts_with("# CATEGORY:") {
+            // Save previous block if exists
+            if let (Some(category), Some(filename)) = (current_category, current_filename.clone()) {
+                categorized_outputs.push(CategorizedOutput {
+                    category: category.to_string(),
+                    description: current_description.unwrap_or("Generated content".to_string()),
+                    filename: filename,
+                    content: current_content.clone(),
+                });
+            }
+            
+            // Start new block
+            current_category = Some(line.split(":").nth(1).unwrap_or("unknown").trim().to_string());
+            current_description = None;
+            current_filename = None;
+            current_content.clear();
+            in_categorized_block = true;
+            continue;
+        }
+        
+        // Check for description header
+        if line.starts_with("# DESCRIPTION:") && in_categorized_block {
+            current_description = Some(line.split(":").nth(1).unwrap_or("").trim().to_string());
+            continue;
+        }
+        
+        // Check for filename header
+        if line.starts_with("# FILENAME:") && in_categorized_block {
+            current_filename = Some(line.split(":").nth(1).unwrap_or("").trim().to_string());
+            continue;
+        }
+        
+        // Collect content
+        if in_categorized_block {
+            current_content.push_str(line);
+            current_content.push('\n');
+        }
+    }
+    
+    // Save final block
+    if let (Some(category), Some(filename)) = (current_category, current_filename.clone()) {
+        categorized_outputs.push(CategorizedOutput {
+            category: category.to_string(),
+            description: current_description.unwrap_or("Generated content".to_string()),
+            filename: filename,
+            content: current_content.clone(),
+        });
+    }
+    
+    // Also check output for any generated files
+    if !output.is_empty() {
+        // Look for file creation messages in output
+        for line in output.lines() {
+            if line.contains("created") || line.contains("saved") || line.contains("generated") {
+                // Try to extract filename and infer category
+                if let Some(filename) = extract_filename_from_output(line) {
+                    let category = infer_category_from_filename(&filename);
+                    let content = format!("Generated by code:\n\n```python\n{}\n```\n\nOutput:\n{}\n", code, output);
+                    
+                    categorized_outputs.push(CategorizedOutput {
+                        category: category.to_string(),
+                        description: format!("Generated {}", filename),
+                        filename: filename,
+                        content: content,
+                    });
+                }
+            }
+        }
+    }
+    
+    categorized_outputs
+}
+
+/// Fallback categorization for legacy code
+async fn categorize_legacy_output(
+    code: &str,
+    output: &str,
+    project_id: &str,
+    state: &State<'_, AppState>,
+) -> Result<(), String> {
     // Check if code generates data files
     if code.contains("pd.read_csv") || code.contains("pd.read_excel") || 
        code.contains("save") || code.contains("to_csv") || code.contains("DataFrame") {
@@ -561,7 +759,7 @@ async fn categorize_code_output(
             content: data_content,
             file_type: "data".to_string(),
         }, state).await?;
-        println!("📊 Backend: Added data output to project");
+        println!("📊 Backend: Added data output to project (legacy)");
     }
     
     // Check if code generates images
@@ -574,23 +772,64 @@ async fn categorize_code_output(
             content: image_content,
             file_type: "image".to_string(),
         }, state).await?;
-        println!("🖼️ Backend: Added image output to project");
+        println!("🖼️ Backend: Added image output to project (legacy)");
     }
     
     // Check if output contains significant findings for write-up
-    if output.len() > 100 && (output.contains("mean") || output.contains("result") || 
-                              output.contains("analysis") || output.contains("finding")) {
-        let write_up_content = format!("Code Execution Results:\n\n```python\n{}\n```\n\nFindings:\n{}\n\n---\n", code, output);
+    if output.len() > 100 && (output.contains("mean") ||
+       output.contains("correlation") || output.contains("significant") ||
+       output.contains("analysis") || output.contains("results")) {
+        let write_up_content = format!("Analysis Results:\n\n```python\n{}\n```\n\nOutput:\n{}\n", code, output);
         save_file_helper(SaveFileRequest {
             project_id: project_id.to_string(),
-            filename: "code_findings.txt".to_string(),
+            filename: format!("analysis_{}.txt", chrono::Utc::now().timestamp()),
             content: write_up_content,
             file_type: "write_up".to_string(),
         }, state).await?;
-        println!("📝 Backend: Added code findings to write-up");
+        println!("📝 Backend: Added analysis results to write-up (legacy)");
     }
     
     Ok(())
+}
+
+/// Extract filename from output line
+fn extract_filename_from_output(line: &str) -> Option<String> {
+    // Look for common patterns
+    let patterns = [
+        r"created.*?([a-zA-Z0-9_\-\.]+\.(csv|json|txt|png|jpg|jpeg))",
+        r"saved.*?([a-zA-Z0-9_\-\.]+\.(csv|json|txt|png|jpg|jpeg))",
+        r"generated.*?([a-zA-Z0-9_\-\.]+\.(csv|json|txt|png|jpg|jpeg))",
+        r"([a-zA-Z0-9_\-\.]+\.(csv|json|txt|png|jpg|jpeg)).*?created",
+    ];
+    
+    for pattern in &patterns {
+        if let Some(captures) = regex::Regex::new(pattern).ok().and_then(|re| re.captures(line)) {
+            if let Some(filename) = captures.get(1) {
+                return Some(filename.as_str().to_string());
+            }
+        }
+    }
+    
+    None
+}
+
+/// Infer category from filename
+fn infer_category_from_filename(filename: &str) -> String {
+    let lower_filename = filename.to_lowercase();
+    
+    if lower_filename.ends_with(".csv") || lower_filename.ends_with(".json") && !lower_filename.contains("visualization") {
+        "data".to_string()
+    } else if lower_filename.ends_with(".json") && lower_filename.contains("visualization") {
+        "visualization".to_string()
+    } else if lower_filename.ends_with(".png") || lower_filename.ends_with(".jpg") || lower_filename.ends_with(".jpeg") {
+        "visualization".to_string()
+    } else if lower_filename.ends_with(".txt") && (lower_filename.contains("analysis") || lower_filename.contains("results")) {
+        "analysis".to_string()
+    } else if lower_filename.ends_with(".py") || lower_filename.ends_with(".txt") {
+        "code".to_string()
+    } else {
+        "data".to_string() // Default to data
+    }
 }
 
 /// Helper function to detect file type from content
@@ -2111,27 +2350,15 @@ async fn start_research(
                 "glossary": context.glossary
             },
             "status": "plan_generated",
-            "created_at": chrono::Utc::now().to_rfc3339()
-        });
-        sessions.insert(request.session_id.clone(), session_data);
-    }
-    
-    // Save the research plan to the session
-    {
-        let mut sessions = state.sessions.lock().unwrap();
-        let session_data = serde_json::json!({
-            "project_id": request.project_id,
-            "goal": request.goal,
-            "plan_cells": cells_json,
-            "context": {
-                "variables": context.variables,
-                "glossary": context.glossary
-            },
-            "status": "plan_generated",
             "created_at": chrono::Utc::now().to_rfc3339(),
             "execution_results": []
         });
-        sessions.insert(request.session_id.clone(), session_data);
+        sessions.insert(request.session_id.clone(), session_data.clone());
+        
+        // Also save to disk for persistence
+        if let Err(e) = save_session_to_disk(&request.session_id, &session_data) {
+            println!("⚠️ Failed to save session to disk: {}", e);
+        }
     }
     
     // Update project with session information
@@ -2257,6 +2484,11 @@ async fn execute_research_steps_background(
                             println!("⚠️ Failed to extract variables from suggested step: {}", e);
                         }
                         
+                        // Categorize the output from suggested steps
+                        if let Err(e) = categorize_code_output(step_code, &exec_result.stdout, &project_id, &state).await {
+                            println!("⚠️ Failed to categorize suggested step output: {}", e);
+                        }
+                        
                         serde_json::json!({
                             "step_number": format!("{}.{}", i, step_idx + 1),
                             "description": format!("Resource preparation: {}", step_code.lines().next().unwrap_or("")),
@@ -2316,6 +2548,11 @@ async fn execute_research_steps_background(
                 // Extract and track variables from the code
                 if let Err(e) = extract_variables_from_code(&cell.content, &exec_result.stdout, &project_id, &state).await {
                     println!("⚠️ Failed to extract variables: {}", e);
+                }
+                
+                // Categorize the output into appropriate tabs
+                if let Err(e) = categorize_code_output(&cell.content, &exec_result.stdout, &project_id, &state).await {
+                    println!("⚠️ Failed to categorize code output: {}", e);
                 }
                 
                 // Create comprehensive execution result
@@ -3038,6 +3275,24 @@ async fn execute_code(
     let execution_result = match cedar::executor::run_python_code(&request.code) {
         Ok(output) => {
             println!("✅ Code executed successfully");
+            
+            // Get project ID from session
+            let project_id = {
+                let sessions = state.sessions.lock().unwrap();
+                if let Some(session_data) = sessions.get(&request.session_id) {
+                    session_data["project_id"].as_str().unwrap_or("").to_string()
+                } else {
+                    "".to_string()
+                }
+            };
+            
+            // Categorize the output if we have a project ID
+            if !project_id.is_empty() {
+                if let Err(e) = categorize_code_output(&request.code, &output, &project_id, &state).await {
+                    println!("⚠️ Failed to categorize code output: {}", e);
+                }
+            }
+            
             serde_json::json!({
                 "status": "executed",
                 "session_id": request.session_id,
@@ -3165,6 +3420,15 @@ struct ResearchPlan {
     status: String, // "draft", "ready", "executing", "completed"
 }
 
+/// Structure for categorized output
+#[derive(Debug)]
+struct CategorizedOutput {
+    category: String,
+    description: String,
+    filename: String,
+    content: String,
+}
+
 /// Question Generation - Generate Questions
 /// 
 /// Uses AI to generate research questions:
@@ -3225,38 +3489,54 @@ And the generated plan steps:
 
 Generate exactly 3 research planning questions that will help clarify the research direction and approach.
 
-CRITICAL FORMAT REQUIREMENT: Every question MUST be in the format "Would you rather we do A) or B)" where A and B are two different approaches, methodologies, or focus areas.
+CRITICAL REQUIREMENTS:
+1. Questions should ONLY ask about what the user wants to accomplish and how they want to approach the research
+2. Questions should be specific to the problem domain and research goal
+3. DO NOT assume the user is an expert in the subject matter
+4. Questions should help determine what Python scripts and data analysis approaches to use
+5. Questions should focus on practical implementation details needed for coding
 
-NEXT STEPS CONTEXT: After answering these questions, we will:
-1. Conduct the research and gather data
-2. Process and analyze the data
-3. Set up variables and data structures
-4. Write Python scripts for analysis
-5. Develop the resulting answer and write-up
+QUESTION FOCUS AREAS:
+- Data sources and collection methods (e.g., "Would you prefer to analyze A) existing data files you can upload, or B) gather new data from external sources?")
+- Analysis approach and depth (e.g., "Should we focus on A) basic statistical summaries and visualizations, or B) advanced machine learning and predictive modeling?")
+- Output format and presentation (e.g., "Would you like the results as A) interactive charts and graphs, or B) detailed written reports with tables?")
 
-IMPORTANT: Focus ONLY on questions about:
-- What the user wants to accomplish (goals, objectives, desired outcomes)
-- How they want to approach the research (methodology preferences, tools, techniques)
-- What scope and boundaries they want to set (timeframe, data sources, depth of analysis)
-- What specific aspects they want to focus on or prioritize
-- What constraints or preferences they have (budget, time, technical requirements)
-
-DO NOT ask questions about:
-- Facts or data the user might not know
-- Technical details they may not be familiar with
+AVOID asking about:
+- Technical details the user may not know
 - Specific values or parameters they haven't provided
+- Facts or data they might not have access to
+- Generic questions that don't relate to the specific research goal
+
+CONTEXT: After answering these questions, we will:
+1. Set up the appropriate Python environment and libraries
+2. Create data loading and processing scripts
+3. Implement the chosen analysis approach
+4. Generate visualizations and results
+5. Create a comprehensive write-up
 
 Return ONLY a JSON array of question objects:
 [
     {{
         "id": "q1",
-        "question": "Would you rather we do A) focus on statistical analysis with detailed charts and graphs, or B) create a machine learning model to predict future trends?",
-        "category": "initial|follow_up|clarification",
+        "question": "Would you prefer to analyze A) existing data files you can upload, or B) gather new data from external sources?",
+        "category": "initial",
+        "status": "pending"
+    }},
+    {{
+        "id": "q2", 
+        "question": "Should we focus on A) basic statistical summaries and visualizations, or B) advanced machine learning and predictive modeling?",
+        "category": "initial",
+        "status": "pending"
+    }},
+    {{
+        "id": "q3",
+        "question": "Would you like the results as A) interactive charts and graphs, or B) detailed written reports with tables?",
+        "category": "initial",
         "status": "pending"
     }}
 ]
 
-Focus on questions that help clarify the user's goals and preferences for the research direction."#,
+Make questions specific to the research goal and focused on determining the technical approach for Python script development."#,
         request.goal,
         plan_cells.iter()
             .map(|cell| format!("- {:?}: {}", cell.cell_type, cell.content))

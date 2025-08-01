@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { apiService } from '../api';
 import ResearchSession from './ResearchSession';
 import DataTab from './DataTab';
@@ -50,6 +50,39 @@ const ProjectView: React.FC<ProjectViewProps> = ({ project, onBack }) => {
   const [deleteConfirmation, setDeleteConfirmation] = useState('');
   const [isDeleting, setIsDeleting] = useState(false);
   const [researchAnswers] = useState<Record<string, string> | undefined>(project.researchAnswers);
+
+  // Auto-start research if project has answers but no active session
+  useEffect(() => {
+    const autoStartResearch = async () => {
+      if (project.researchAnswers && Object.keys(project.researchAnswers).length > 0 && 
+          (!project.session_id || project.session_status !== 'active')) {
+        try {
+          const sessionId = `session_${project.id}`;
+          
+          const response = await apiService.startResearch({
+            projectId: project.id,
+            sessionId: sessionId,
+            goal: project.goal,
+            answers: project.researchAnswers
+          });
+
+          const responseData = response as any;
+          if (responseData.cells) {
+            // Research started successfully - update the project data
+            setProjectData(prev => ({
+              ...prev,
+              session_id: sessionId,
+              session_status: 'active'
+            }));
+          }
+        } catch (error) {
+          console.error('Failed to auto-start research:', error);
+        }
+      }
+    };
+
+    autoStartResearch();
+  }, [project.id, project.goal, project.researchAnswers, project.session_id, project.session_status]);
 
   const tabs = [
     { id: 'notebook', label: 'Notebook', icon: '📓' },

@@ -96,6 +96,116 @@ When generating research plans, follow this structure:
 
 ## 📝 **Code Generation Guidelines**
 
+### **CRITICAL: Output Categorization**
+When generating any content, you MUST categorize your outputs using this format:
+
+```python
+# CATEGORY: data
+# DESCRIPTION: Customer churn dataset with features and target variable
+# FILENAME: customer_churn_data.csv
+import pandas as pd
+import numpy as np
+
+# Generate sample customer data
+np.random.seed(42)
+n_customers = 1000
+data = {
+    'customer_id': range(1, n_customers + 1),
+    'tenure_months': np.random.randint(1, 72, n_customers),
+    'monthly_charges': np.random.uniform(30, 150, n_customers),
+    'total_charges': np.random.uniform(100, 5000, n_customers),
+    'churn': np.random.choice([0, 1], n_customers, p=[0.8, 0.2])
+}
+
+df = pd.DataFrame(data)
+df.to_csv('customer_churn_data.csv', index=False)
+print("Customer churn dataset created with 1000 records")
+```
+
+```python
+# CATEGORY: visualization
+# DESCRIPTION: Bar chart showing churn rate by tenure groups
+# FILENAME: churn_by_tenure.json
+import pandas as pd
+import json
+
+# Load data and create visualization
+df = pd.read_csv('customer_churn_data.csv')
+df['tenure_group'] = pd.cut(df['tenure_months'], bins=[0, 12, 24, 36, 48, 60, 72], 
+                           labels=['0-12', '13-24', '25-36', '37-48', '49-60', '60+'])
+
+churn_by_tenure = df.groupby('tenure_group')['churn'].mean().reset_index()
+
+# Create Vega-Lite specification
+vega_spec = {
+    "$schema": "https://vega.github.io/schema/vega-lite/v5.json",
+    "description": "Churn rate by customer tenure groups",
+    "data": {"values": churn_by_tenure.to_dict('records')},
+    "mark": "bar",
+    "encoding": {
+        "x": {"field": "tenure_group", "type": "nominal", "title": "Tenure Group (months)"},
+        "y": {"field": "churn", "type": "quantitative", "title": "Churn Rate"}
+    },
+    "title": "Customer Churn Rate by Tenure Group"
+}
+
+# Save visualization
+with open('churn_by_tenure.json', 'w') as f:
+    json.dump(vega_spec, f, indent=2)
+
+print("Vega-Lite visualization created: churn_by_tenure.json")
+```
+
+```python
+# CATEGORY: analysis
+# DESCRIPTION: Statistical analysis of churn factors
+# FILENAME: churn_analysis.txt
+import pandas as pd
+from scipy import stats
+
+# Load data
+df = pd.read_csv('customer_churn_data.csv')
+
+# Correlation analysis
+correlation = df[['tenure_months', 'monthly_charges', 'total_charges', 'churn']].corr()
+
+# T-test for monthly charges
+churned = df[df['churn'] == 1]['monthly_charges']
+not_churned = df[df['churn'] == 0]['monthly_charges']
+t_stat, p_value = stats.ttest_ind(churned, not_churned)
+
+analysis_results = f"""
+CHURN ANALYSIS RESULTS
+=====================
+
+Correlation Matrix:
+{correlation}
+
+T-Test Results (Monthly Charges):
+- T-statistic: {t_stat:.4f}
+- P-value: {p_value:.4f}
+- Significant difference: {'Yes' if p_value < 0.05 else 'No'}
+
+Key Findings:
+1. Monthly charges show significant correlation with churn
+2. Tenure has negative correlation with churn
+3. Higher charges associated with higher churn rates
+"""
+
+with open('churn_analysis.txt', 'w') as f:
+    f.write(analysis_results)
+
+print("Analysis results saved to churn_analysis.txt")
+```
+
+### **Output Categories:**
+- **data**: CSV files, datasets, dataframes, raw data
+- **visualization**: Charts, graphs, plots (Vega-Lite/Plotly JSON)
+- **analysis**: Statistical results, insights, findings
+- **code**: Reusable functions, utilities, scripts
+- **reference**: External sources, citations, documentation
+- **write_up**: Final reports, summaries, conclusions
+
 ### **Python Code for Vega-Lite**
 ```python
 import pandas as pd
