@@ -691,6 +691,16 @@ const ResearchSession: React.FC<ResearchSessionProps> = ({
   const generateInitializationCell = async (goal: string): Promise<Cell> => {
     const initialization = await apiService.initializeResearch({ goal }) as any;
     
+    // Store the background summary as an abstract in the write-up tab
+    if (initialization.background_summary) {
+      try {
+        await dataRouter.routeWriteUp(`# Abstract\n\n${initialization.background_summary}`);
+        console.log('✅ Abstract stored in write-up tab');
+      } catch (error) {
+        console.error('Failed to store abstract:', error);
+      }
+    }
+    
     return {
       id: `initialization-${Date.now()}`,
       type: 'initialization',
@@ -702,6 +712,7 @@ const ResearchSession: React.FC<ResearchSessionProps> = ({
       metadata: {
         references: initialization.sources,
         questions: initialization.questions,
+        background_summary: initialization.background_summary,
       },
     };
   };
@@ -893,6 +904,23 @@ const ResearchSession: React.FC<ResearchSessionProps> = ({
     return resultCell;
   };
 
+  const generateFinalWriteUp = async (executionResults: any[]): Promise<string> => {
+    try {
+      // Call backend to generate comprehensive write-up
+      const response = await apiService.generateFinalWriteUp({
+        projectId,
+        sessionId,
+        executionResults,
+        goal,
+      });
+      
+      return response.content || 'No write-up content generated';
+    } catch (error) {
+      console.error('Failed to generate final write-up:', error);
+      throw error;
+    }
+  };
+
   const generateNextStepOrWriteup = async (resultCell: Cell): Promise<Cell | null> => {
     const currentStep = resultCell.metadata?.stepOrder || 0;
     const totalSteps = resultCell.metadata?.totalSteps || 0;
@@ -918,15 +946,39 @@ const ResearchSession: React.FC<ResearchSessionProps> = ({
       }
     } else {
       // Generate final writeup
-      return {
-        id: `writeup-${Date.now()}`,
-        type: 'writeup',
-        content: 'Generating final research write-up...',
-        timestamp: new Date().toISOString(),
-        status: 'active',
-        requiresUserAction: false,
-        canProceed: false,
-      };
+      try {
+        // Get all execution results from the session
+        const executionResults = cells
+          .filter(cell => cell.type === 'result' && cell.metadata?.executionResults)
+          .flatMap(cell => cell.metadata.executionResults || []);
+        
+        // Generate comprehensive write-up using backend
+        const writeUpContent = await generateFinalWriteUp(executionResults);
+        
+        // Store the write-up in the write-up tab
+        await dataRouter.routeWriteUp(writeUpContent);
+        
+        return {
+          id: `writeup-${Date.now()}`,
+          type: 'writeup',
+          content: writeUpContent,
+          timestamp: new Date().toISOString(),
+          status: 'completed',
+          requiresUserAction: false,
+          canProceed: false,
+        };
+      } catch (error) {
+        console.error('Failed to generate write-up:', error);
+        return {
+          id: `writeup-${Date.now()}`,
+          type: 'writeup',
+          content: 'Error generating final research write-up. Please check the console for details.',
+          timestamp: new Date().toISOString(),
+          status: 'error',
+          requiresUserAction: false,
+          canProceed: false,
+        };
+      }
     }
     
     return null;

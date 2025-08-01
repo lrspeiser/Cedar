@@ -3410,6 +3410,19 @@ struct GenerateTitleResponse {
     title: String,
 }
 
+#[derive(Deserialize)]
+struct GenerateFinalWriteUpRequest {
+    project_id: String,
+    session_id: String,
+    execution_results: Vec<serde_json::Value>,
+    goal: String,
+}
+
+#[derive(Serialize)]
+struct GenerateFinalWriteUpResponse {
+    content: String,
+}
+
 #[derive(serde::Deserialize, serde::Serialize)]
 struct GenerateResearchPlanRequest {
     goal: String,
@@ -3736,6 +3749,56 @@ Focus on creating a clear, concise title that immediately conveys what the resea
     println!("✅ Title generated: {}", title);
     
     Ok(GenerateTitleResponse { title })
+}
+
+/// Generate Final Write-Up - Comprehensive Research Report
+/// 
+/// Generates a comprehensive research write-up based on execution results and project context.
+/// This function creates a complete research report with methodology, results, and conclusions.
+/// 
+/// TESTING: See tests::test_final_write_up_generation() (to be added)
+/// CLI TESTING: Use generate_final_write_up command
+/// API TESTING: Call generate_final_write_up endpoint
+#[tauri::command]
+async fn generate_final_write_up(
+    request: GenerateFinalWriteUpRequest,
+    state: State<'_, AppState>,
+) -> Result<GenerateFinalWriteUpResponse, String> {
+    println!("📝 Generating final write-up for project: {}", request.project_id);
+    
+    // Check if API key is available
+    let has_api_key = {
+        let api_key = state.api_key.lock().unwrap();
+        api_key.is_some()
+    };
+    
+    if !has_api_key {
+        return Err("API key not configured. Please set your API key first.".to_string());
+    }
+    
+    // Gather project context
+    let project_context = gather_project_context(&request.project_id, &state).await?;
+    
+    // Generate the write-up content
+    let write_up_content = generate_write_up_content(&project_context, &request.execution_results)?;
+    
+    // Save the write-up to the project
+    let save_request = SaveFileRequest {
+        project_id: request.project_id.clone(),
+        filename: "research_write_up.md".to_string(),
+        content: write_up_content.clone(),
+        file_type: "write_up".to_string(),
+    };
+    
+    if let Err(e) = save_file_helper(save_request, &state).await {
+        println!("⚠️ Failed to save write-up to project: {}", e);
+    }
+    
+    println!("✅ Final write-up generated and saved successfully");
+    
+    Ok(GenerateFinalWriteUpResponse {
+        content: write_up_content,
+    })
 }
 
 /// API TESTING: Call initialize_research endpoint
@@ -5357,9 +5420,10 @@ fn main() {
             update_library,
             start_research,
             execute_code,
-            generate_questions,
-            generate_title,
-            initialize_research,
+                                    generate_questions,
+                        generate_title,
+                        generate_final_write_up,
+                        initialize_research,
             generate_research_plan,
             execute_step,
             generate_next_steps,

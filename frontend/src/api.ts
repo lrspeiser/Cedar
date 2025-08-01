@@ -1170,6 +1170,24 @@ class ApiService {
     }
   }
 
+  async generateFinalWriteUp(request: {
+    projectId: string;
+    sessionId: string;
+    executionResults: any[];
+    goal: string;
+  }) {
+    console.log('📝 Calling Tauri backend: generate_final_write_up', request);
+    
+    try {
+      const result = await invoke('generate_final_write_up', { request });
+      console.log('✅ Backend final write-up generated successfully');
+      return result;
+    } catch (error) {
+      console.error('❌ Backend error generating final write-up:', error);
+      throw error;
+    }
+  }
+
   async generateVisualization(request: {
     projectId: string;
     data: any[];
