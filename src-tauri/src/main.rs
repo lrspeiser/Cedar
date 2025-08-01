@@ -4,7 +4,7 @@
 #[cfg(test)]
 mod tests;
 
-use tauri::State;
+use tauri::{State, command};
 use serde::{Deserialize, Serialize};
 use serde_json::Value as JsonValue;
 use std::sync::Mutex;
@@ -3458,6 +3458,12 @@ struct GenerateFinalWriteUpRequest {
     goal: String,
 }
 
+struct CallLLMRequest {
+    prompt: String,
+    context: Option<String>,
+    user_comment: Option<String>,
+}
+
 #[derive(Serialize)]
 struct GenerateFinalWriteUpResponse {
     content: String,
@@ -5896,6 +5902,72 @@ async fn list_data_files(
         "message": "Data files retrieved successfully"
     }))
 }
+
+/// Generic LLM call function for data analysis and other tasks
+/// 
+/// This function provides a flexible interface for making LLM calls with:
+/// - Custom prompts
+/// - Optional context
+/// - User comments for feedback
+/// 
+/// Example usage:
+/// ```javascript
+/// const result = await apiService.callLLM({
+///   prompt: "Analyze this data...",
+///   context: "Previous analysis...",
+///   userComment: "Focus on urban areas"
+/// });
+/// ```
+#[tauri::command]
+async fn call_llm(
+    request: CallLLMRequest,
+    state: State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    println!("🤖 Backend: Making LLM call");
+    
+    // Get API key
+    let api_key = {
+        let api_key_guard = state.api_key.lock().unwrap();
+        api_key_guard.clone().ok_or("API key not set")?
+    };
+    
+    // Build the full prompt with context
+    let mut full_prompt = request.prompt.clone();
+    
+    if let Some(context) = request.context {
+        if !context.is_empty() {
+            full_prompt = format!("Context:\n{}\n\nTask:\n{}", context, full_prompt);
+        }
+    }
+    
+    if let Some(comment) = request.user_comment {
+        if !comment.is_empty() {
+            full_prompt = format!("{}\n\nUser Comment:\n{}", full_prompt, comment);
+        }
+    }
+    
+    // Set the API key environment variable for the LLM module
+    std::env::set_var("OPENAI_API_KEY", &api_key);
+    
+    // Make the LLM call using the cedar-core LLM module
+    match llm::ask_llm(&full_prompt).await {
+        Ok(response) => {
+            println!("✅ Backend: LLM call completed successfully");
+            
+            // Try to parse as JSON first, if that fails return as plain text
+            match serde_json::from_str::<serde_json::Value>(&response) {
+                Ok(json_response) => Ok(json_response),
+                Err(_) => Ok(serde_json::json!({
+                    "response": response
+                }))
+            }
+        }
+        Err(e) => {
+            println!("❌ Backend: LLM call failed: {}", e);
+            Err(format!("LLM call failed: {}", e))
+        }
+    }
+}
     println!("🧪 Running CLI test: {}", request.command);
     
     match request.command.as_str() {
@@ -6202,6 +6274,7 @@ fn main() {
             // analyze_data_file,
             // execute_duckdb_query,
             // list_data_files,
+            call_llm,
             // API Testing endpoints
             test_api_endpoint,
             run_test_suite,

@@ -54,6 +54,10 @@ interface Cell {
     // Streaming support
     streamLines?: string[];
     isStreaming?: boolean;
+    // Rerun support
+    isRerun?: boolean;
+    originalCellId?: string;
+    userComment?: string;
   };
   requiresUserAction?: boolean;
   canProceed?: boolean;
@@ -64,6 +68,7 @@ interface CellComponentProps {
   onExecute?: (cell: Cell) => void;
   onNextStep?: (cell: Cell) => void;
   onSubmitComment?: (cell: Cell, comment: string) => void;
+  onRerun?: (cell: Cell, comment: string) => void;
   onQuestionAnswer?: (cellId: string, questionId: string, answer: string) => void;
   executionThread?: {
     id: string;
@@ -77,7 +82,7 @@ interface CellComponentProps {
   };
 }
 
-const CellComponent: React.FC<CellComponentProps> = ({ cell, onExecute, onNextStep, onSubmitComment, executionThread }) => {
+const CellComponent: React.FC<CellComponentProps> = ({ cell, onExecute, onNextStep, onSubmitComment, onRerun, executionThread }) => {
   const [expanded, setExpanded] = useState(true);
   const [comment, setComment] = useState('');
   const [showCommentInput, setShowCommentInput] = useState(false);
@@ -97,6 +102,14 @@ const CellComponent: React.FC<CellComponentProps> = ({ cell, onExecute, onNextSt
   const handleSubmitComment = () => {
     if (onSubmitComment && comment.trim()) {
       onSubmitComment(cell, comment.trim());
+      setComment('');
+      setShowCommentInput(false);
+    }
+  };
+
+  const handleRerun = () => {
+    if (onRerun && comment.trim()) {
+      onRerun(cell, comment.trim());
       setComment('');
       setShowCommentInput(false);
     }
@@ -192,7 +205,7 @@ const CellComponent: React.FC<CellComponentProps> = ({ cell, onExecute, onNextSt
       case 'phase':
         return 'Research Phase';
       case 'initialization':
-        return 'Research Initialization';
+        return 'References Collection';
       case 'questions':
         return 'Questions & References';
       case 'plan':
@@ -236,6 +249,31 @@ const CellComponent: React.FC<CellComponentProps> = ({ cell, onExecute, onNextSt
         return 'Progress Log';
       default:
         return 'Cell';
+    }
+  };
+
+  const getNextStepLabel = (): string => {
+    switch (cell.type) {
+      case 'goal':
+        return 'References Collection';
+      case 'initialization':
+        return 'Data Assessment';
+      case 'data_assessment':
+        // Check if we have data files to determine next step
+        const hasDataFiles = cell.metadata?.existingDataFiles?.length > 0;
+        return hasDataFiles ? 'Analysis Planning' : 'Data Collection';
+      case 'data_collection':
+        return 'Analysis Planning';
+      case 'analysis_plan':
+        return 'Analysis Execution';
+      case 'analysis_execution':
+        return 'Generate Results';
+      case 'result':
+        return 'Generate Write-up';
+      case 'writeup':
+        return 'Research Complete';
+      default:
+        return 'Next Step';
     }
   };
 
@@ -925,18 +963,29 @@ const CellComponent: React.FC<CellComponentProps> = ({ cell, onExecute, onNextSt
           {cell.status === 'completed' && cell.canProceed && onNextStep && (
             <div className="mt-6 border-t border-gray-200 pt-4">
               <div className="flex items-center justify-between">
-                <button
-                  onClick={handleToggleCommentInput}
-                  className="text-sm text-cedar-600 hover:text-cedar-700 transition-colors"
-                >
-                  {showCommentInput ? 'Cancel' : 'Add Comment'}
-                </button>
+                <div className="flex items-center space-x-2">
+                  <button
+                    onClick={handleToggleCommentInput}
+                    className="text-sm text-cedar-600 hover:text-cedar-700 transition-colors"
+                  >
+                    {showCommentInput ? 'Cancel' : 'Add Comment'}
+                  </button>
+                  {showCommentInput && onRerun && (
+                    <button
+                      onClick={handleRerun}
+                      disabled={!comment.trim()}
+                      className="flex items-center space-x-1 px-3 py-1 bg-orange-500 text-white text-sm rounded-md hover:bg-orange-600 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      <span>🔄 Rerun</span>
+                    </button>
+                  )}
+                </div>
                 <button
                   onClick={handleNextStep}
                   className="flex items-center space-x-1 px-4 py-2 bg-green-500 text-white text-sm rounded-md hover:bg-green-600 transition-colors"
                 >
                   <ChevronRight className="h-4 w-4" />
-                  <span>Next Step</span>
+                  <span>Next: {getNextStepLabel(cell)}</span>
                 </button>
               </div>
             </div>

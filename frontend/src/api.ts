@@ -1366,7 +1366,29 @@ class ApiService {
   //     console.error("❌ Backend error updating research paper:", error);
   //     throw error;
   //   }
-  // }
+  //   }
+
+  async callLLM(request: {
+    prompt: string;
+    context?: string;
+    userComment?: string;
+  }) {
+    try {
+      console.log('🤖 Making LLM call:', request);
+      
+      const response = await invoke('call_llm', {
+        prompt: request.prompt,
+        context: request.context || '',
+        userComment: request.userComment || ''
+      });
+      
+      console.log('✅ LLM call completed successfully:', response);
+      return response;
+    } catch (error) {
+      console.error('❌ Failed to make LLM call:', error);
+      throw error;
+    }
+  }
 
   // API Testing Functions
   async testApiEndpoint(request: { endpoint: string; method: string; data?: any }) {

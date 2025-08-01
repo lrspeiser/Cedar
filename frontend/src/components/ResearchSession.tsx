@@ -93,6 +93,9 @@ interface Cell {
     // Streaming support
     streamLines?: string[];
     isStreaming?: boolean;
+    isRerun?: boolean;
+    originalCellId?: string;
+    userComment?: string;
   };
   requiresUserAction?: boolean;
   canProceed?: boolean;
@@ -1008,7 +1011,7 @@ const ResearchSession: React.FC<ResearchSessionProps> = ({
     const initializationCell: Cell = {
       id: `initialization-${Date.now()}`,
       type: 'initialization',
-      content: `# Research Initialization Progress\n\n**Goal**: ${goal}\n\n`,
+      content: `# Research References Collection\n\n**Goal**: ${goal}\n\n`,
       timestamp: new Date().toISOString(),
       status: 'active',
       requiresUserAction: false,
@@ -1022,26 +1025,26 @@ const ResearchSession: React.FC<ResearchSessionProps> = ({
     
     // Add the cell to the UI immediately
     const updatedCells = [...cells, initializationCell];
-    console.log('🔍 Adding initialization cell to UI:', initializationCell.id);
+    console.log('🔍 Adding references collection cell to UI:', initializationCell.id);
     setCells(updatedCells);
     await saveSession(updatedCells);
     
     try {
       // Stream the progress updates
       await streamLines(initializationCell.id, [
-        '## Step 1: 🔄 Starting Research Initialization...',
+        '## Step 1: 🔄 Starting References Collection...',
         '',
         '🔍 Connecting to LLM service...',
         '📡 Establishing connection...',
         '✅ Connection established',
         '',
-        '## Step 2: 🔄 Calling LLM for Research Sources...',
+        '## Step 2: 🔄 Searching for Research Sources...',
         '',
-        '🤖 Generating research sources and background information...',
-        '🧠 Processing research goal...',
-        '📚 Searching academic databases...',
-        '🔍 Analyzing relevant literature...',
-      ], 150);
+        '🤖 Searching academic databases and authoritative sources...',
+        '🧠 Analyzing research goal for relevant keywords...',
+        '📚 Identifying recent, authoritative references...',
+        '🔍 Evaluating source relevance and quality...',
+      ], 120);
       
       // Call the LLM with context
       const initialization = await makeContextualLLMCall('initialization', initializationCell.id) as any;
@@ -1050,11 +1053,11 @@ const ResearchSession: React.FC<ResearchSessionProps> = ({
       await streamLines(initializationCell.id, [
         '✅ LLM processing complete',
         '',
-        '## Step 3: 🔄 Processing Results...',
+        '## Step 3: 🔄 Processing References...',
         '',
         `📚 Found ${initialization.sources?.length || 0} research sources`,
-        '📝 Generating background summary...',
-        '🔗 Organizing references...',
+        '🔗 Organizing reference metadata...',
+        '📝 Extracting titles, authors, and summaries...',
       ], 100);
       
       // Store references in the references tab
@@ -1063,7 +1066,30 @@ const ResearchSession: React.FC<ResearchSessionProps> = ({
           await dataRouter.routeReferences(initialization.sources);
           await streamLines(initializationCell.id, [
             '✅ References stored in References tab',
+            '',
+            '## 📚 References Found:',
+            '',
           ], 50);
+          
+          // Stream each reference
+          for (const source of initialization.sources) {
+            await streamLines(initializationCell.id, [
+              `**${source.title}**`,
+              `*${source.authors} (${source.year})*`,
+              `${source.summary}`,
+              source.url ? `[View Source](${source.url})` : '',
+              '',
+            ], 80);
+          }
+          
+          // Also route the cell data to ensure references are properly stored
+          await routeCellData({
+            ...initializationCell,
+            metadata: {
+              ...initializationCell.metadata,
+              references: initialization.sources,
+            }
+          });
         } catch (error) {
           console.error('Failed to store references:', error);
           await streamLines(initializationCell.id, [
@@ -1075,11 +1101,11 @@ const ResearchSession: React.FC<ResearchSessionProps> = ({
       // Stream completion
       await streamLines(initializationCell.id, [
         '',
-        '## Step 4: ✅ Research Initialization Complete!',
+        '## Step 4: ✅ References Collection Complete!',
         '',
         `📚 **${initialization.sources?.length || 0} research sources** found and stored`,
-        '📝 **Background summary** generated',
         '🔗 **References** routed to References tab',
+        '📖 **Source metadata** extracted and organized',
         '',
         '**Next**: Proceeding to data assessment...',
       ], 100);
@@ -1094,8 +1120,6 @@ const ResearchSession: React.FC<ResearchSessionProps> = ({
               metadata: {
                 ...cell.metadata,
                 references: initialization.sources,
-                questions: initialization.questions,
-                background_summary: initialization.background_summary,
                 goal,
                 isStreaming: false,
               },
@@ -1110,7 +1134,7 @@ const ResearchSession: React.FC<ResearchSessionProps> = ({
       // Stream error
       await streamLines(initializationCell.id, [
         '',
-        '## ❌ Error During Initialization',
+        '## ❌ Error During References Collection',
         '',
         `**Error**: ${error}`,
         '',
@@ -2252,6 +2276,7 @@ const ResearchSession: React.FC<ResearchSessionProps> = ({
         onExecute={cell.type === 'code' ? () => executeCodeStep(cell) : undefined}
         onNextStep={handleNextStep}
         onSubmitComment={handleSubmitComment}
+        onRerun={rerunStepWithContext}
       />
     );
   };
@@ -2324,14 +2349,19 @@ Please provide a detailed, thoughtful response based on the research context abo
       case 'initialization':
         return `${basePrompt}
 
-TASK: Research Initialization
+TASK: Research References Collection
 Based on the research goal, please:
-1. Identify relevant research sources and academic references
-2. Generate a comprehensive background summary
-3. Suggest key research questions to explore
-4. Outline the main research areas to investigate
+1. Identify 5-10 relevant research sources and academic references
+2. For each reference, provide:
+   - Title
+   - Authors
+   - Publication year
+   - URL or DOI if available
+   - Brief summary (1-2 sentences)
+3. Focus on recent, authoritative sources
+4. Include a mix of academic papers, reports, and authoritative websites
 
-Format your response as a structured research initialization with clear sections.`;
+Format your response as a JSON object with a "sources" array containing the references. Each source should have: title, authors, year, url, summary.`;
 
       case 'data_assessment':
         return `${basePrompt}
@@ -2441,6 +2471,221 @@ Provide complete, runnable Python code with proper error handling and documentat
           prompt: prompt,
           context: context
         });
+    }
+  };
+
+  // Get the next step label for the current cell
+  const getNextStepLabel = (currentCell: Cell): string => {
+    switch (currentCell.type) {
+      case 'goal':
+        return 'Next: References Collection';
+      case 'initialization':
+        return 'Next: Data Assessment';
+      case 'data_assessment':
+        // Check if we have data files to determine next step
+        const hasDataFiles = currentCell.metadata?.existingDataFiles?.length > 0;
+        return hasDataFiles ? 'Next: Analysis Planning' : 'Next: Data Collection';
+      case 'data_collection':
+        return 'Next: Analysis Planning';
+      case 'analysis_plan':
+        return 'Next: Analysis Execution';
+      case 'analysis_execution':
+        return 'Next: Generate Results';
+      case 'result':
+        return 'Next: Generate Write-up';
+      case 'writeup':
+        return 'Research Complete';
+      default:
+        return 'Next Step';
+    }
+  };
+
+  // Rerun a step with full context and user comment
+  const rerunStepWithContext = async (currentCell: Cell, comment: string): Promise<Cell> => {
+    console.log('🔄 Rerunning step with context:', currentCell.type, 'Comment:', comment);
+    
+    // Build full research context including the comment
+    const context = buildResearchContext(`Rerunning ${getCellTypeLabel(currentCell.type)} with user feedback: ${comment}`, currentCell.id);
+    
+    // Create a new cell for the rerun
+    const rerunCell: Cell = {
+      id: `${currentCell.type}-rerun-${Date.now()}`,
+      type: currentCell.type,
+      content: `# ${getCellTypeLabel(currentCell.type)} (Rerun)\n\n**Goal**: ${goal}\n\n**User Comment**: ${comment}\n\n`,
+      timestamp: new Date().toISOString(),
+      status: 'active',
+      requiresUserAction: false,
+      canProceed: false,
+      metadata: {
+        ...currentCell.metadata,
+        isRerun: true,
+        originalCellId: currentCell.id,
+        userComment: comment,
+        streamLines: [],
+        isStreaming: true,
+      },
+    };
+    
+    // Add the rerun cell to the UI immediately
+    const updatedCells = [...cells, rerunCell];
+    setCells(updatedCells);
+    await saveSession(updatedCells);
+    
+    try {
+      // Stream the progress updates
+      await streamLines(rerunCell.id, [
+        '## 🔄 Rerunning with User Feedback...',
+        '',
+        `💬 **User Comment**: ${comment}`,
+        '',
+        '🤖 Consulting AI with full research context...',
+        '🧠 Analyzing previous research entries...',
+        '📝 Generating updated response...',
+      ], 120);
+      
+      // Make contextual LLM call with enhanced prompt
+      const enhancedPrompt = `${getLLMPrompt(currentCell.type, context)}\n\n## User Feedback\n${comment}\n\nPlease consider this feedback when providing your response.`;
+      
+      let rerunResult;
+      switch (currentCell.type) {
+        case 'initialization':
+          rerunResult = await apiService.initializeResearch({ 
+            goal,
+            context: context,
+            prompt: enhancedPrompt,
+            userComment: comment
+          });
+          break;
+        
+        case 'data_assessment':
+          rerunResult = await apiService.analyzeDataFile({ 
+            projectId,
+            context: context,
+            prompt: enhancedPrompt,
+            userComment: comment
+          });
+          break;
+        
+        case 'data_collection':
+          rerunResult = await apiService.generateDataFile({ 
+            projectId,
+            context: context,
+            prompt: enhancedPrompt,
+            userComment: comment
+          });
+          break;
+        
+        case 'analysis_plan':
+          rerunResult = await apiService.generateResearchPlan({ 
+            goal,
+            context: context,
+            prompt: enhancedPrompt,
+            userComment: comment
+          });
+          break;
+        
+        case 'analysis_execution':
+          rerunResult = await apiService.executeCode({ 
+            code: enhancedPrompt,
+            sessionId,
+            context: context,
+            userComment: comment
+          });
+          break;
+        
+        default:
+          rerunResult = await apiService.callLLM({ 
+            prompt: enhancedPrompt,
+            context: context,
+            userComment: comment
+          });
+      }
+      
+      // Stream the LLM response
+      if (rerunResult && (rerunResult.response || rerunResult.plan || rerunResult.assessment)) {
+        const response = rerunResult.response || rerunResult.plan || rerunResult.assessment;
+        await streamLines(rerunCell.id, [
+          '',
+          '## Updated Response:',
+          '',
+        ], 50);
+        
+        // Stream the LLM response in chunks
+        const responseLines = response.split('\n');
+        for (const line of responseLines) {
+          if (line.trim()) {
+            await streamLines(rerunCell.id, [line], 30);
+          }
+        }
+      } else {
+        // Fallback content
+        await streamLines(rerunCell.id, [
+          '',
+          '## Rerun Complete',
+          '',
+          'The step has been rerun with your feedback and full research context.',
+          'Please review the updated results above.',
+        ], 100);
+      }
+      
+      // Stream completion
+      await streamLines(rerunCell.id, [
+        '',
+        '## ✅ Rerun Complete!',
+        '',
+        '🤖 **AI response** updated with your feedback',
+        '📚 **Full research context** considered',
+        '💬 **User comment** incorporated',
+        '',
+        `**Next**: ${getNextStepLabel(rerunCell)}`,
+      ], 100);
+      
+      // Update the cell to completed status
+      const finalCells = cells.map(cell => 
+        cell.id === rerunCell.id 
+          ? { 
+              ...cell, 
+              status: 'completed' as const,
+              canProceed: true,
+              metadata: {
+                ...cell.metadata,
+                rerunResult: rerunResult,
+                isStreaming: false,
+              },
+            }
+          : cell
+      );
+      setCells(finalCells);
+      await saveSession(finalCells);
+      
+      return finalCells.find(cell => cell.id === rerunCell.id)!;
+    } catch (error) {
+      // Stream error
+      await streamLines(rerunCell.id, [
+        '',
+        '## ❌ Error During Rerun',
+        '',
+        `**Error**: ${error}`,
+        '',
+        'Please try again.',
+      ], 100);
+      
+      // Update the cell to error status
+      const errorCells = cells.map(cell => 
+        cell.id === rerunCell.id 
+          ? { 
+              ...cell, 
+              status: 'error' as const,
+              metadata: {
+                ...cell.metadata,
+                isStreaming: false,
+              },
+            }
+          : cell
+      );
+      setCells(errorCells);
+      await saveSession(errorCells);
+      throw error;
     }
   };
 
