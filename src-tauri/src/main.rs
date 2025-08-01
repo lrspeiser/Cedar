@@ -104,6 +104,8 @@ struct Project {
     questions: Vec<Question>,
     libraries: Vec<Library>,
     write_up: String,
+    session_id: Option<String>,
+    session_status: Option<String>,
 }
 
 /// Academic Reference Management
@@ -1179,6 +1181,8 @@ async fn create_project(
         questions: Vec::new(),
         libraries: Vec::new(),
         write_up: String::new(),
+        session_id: None,
+        session_status: None,
     };
     
     // Save project to file
@@ -1812,6 +1816,21 @@ async fn start_research(
         sessions.insert(request.session_id.clone(), session_data);
     }
     
+    // Update project with session information
+    {
+        let mut projects = state.projects.lock().unwrap();
+        if let Some(project) = projects.get_mut(&request.project_id) {
+            project.session_id = Some(request.session_id.clone());
+            project.session_status = Some("plan_generated".to_string());
+            project.updated_at = chrono::Utc::now().to_rfc3339();
+            
+            // Save updated project to disk
+            if let Err(e) = save_project(project) {
+                println!("⚠️ Failed to save project with session info: {}", e);
+            }
+        }
+    }
+    
     // Start executing the research steps automatically in the background
     let session_id = request.session_id.clone();
     let project_id = request.project_id.clone();
@@ -1864,6 +1883,20 @@ async fn execute_research_steps_background(
     
     // Update session status to executing
     update_session_status(&session_id, "executing", &[])?;
+    
+    // Update project status to executing
+    {
+        let mut projects = state.projects.lock().unwrap();
+        if let Some(project) = projects.get_mut(&project_id) {
+            project.session_status = Some("executing".to_string());
+            project.updated_at = chrono::Utc::now().to_rfc3339();
+            
+            // Save updated project to disk
+            if let Err(e) = save_project(project) {
+                println!("⚠️ Failed to save project status: {}", e);
+            }
+        }
+    }
     
     let mut session_code = String::new();
     let mut execution_results = Vec::new();
@@ -2015,6 +2048,20 @@ async fn execute_research_steps_background(
     
     // Update session status to completed
     update_session_status(&session_id, "completed", &execution_results)?;
+    
+    // Update project status to completed
+    {
+        let mut projects = state.projects.lock().unwrap();
+        if let Some(project) = projects.get_mut(&project_id) {
+            project.session_status = Some("completed".to_string());
+            project.updated_at = chrono::Utc::now().to_rfc3339();
+            
+            // Save updated project to disk
+            if let Err(e) = save_project(project) {
+                println!("⚠️ Failed to save project status: {}", e);
+            }
+        }
+    }
     
     // Generate and save comprehensive write-up
     println!("📝 Generating comprehensive research write-up...");
@@ -2731,8 +2778,17 @@ struct InitializeResearchRequest {
 }
 
 #[derive(serde::Serialize)]
+struct ResearchSource {
+    title: String,
+    authors: String,
+    url: Option<String>,
+    summary: String,
+}
+
+#[derive(serde::Serialize)]
 struct ResearchInitialization {
     title: String,
+    sources: Vec<ResearchSource>,
     questions: Vec<ResearchQuestion>,
 }
 
@@ -2929,55 +2985,84 @@ async fn initialize_research(
         return Err("Research initialization requires a valid OpenAI API key. Please configure your API key first.".to_string());
     }
     
-    // Generate title and questions using LLM
+    // Generate title, research sources, background summary, and research directions using LLM
     let prompt = format!(
         r#"Based on this research goal: "{}"
 
 Generate:
 1. A concise title (5 words or less)
-2. Exactly 3 specific questions to help clarify the research approach and preferences
+2. Top 3 academic research sources on this subject with 1-paragraph summaries
+3. A comprehensive background summary section for the research paper
+4. One question with numbered research directions to focus on
 
-CRITICAL FORMAT REQUIREMENT: Every question MUST be in the format "Would you rather we do A) or B)" where A and B are two different approaches, methodologies, or focus areas.
+ACADEMIC SOURCES REQUIREMENT: Find the top 3 most relevant and authoritative ACADEMIC research sources (peer-reviewed papers, academic studies, scholarly articles) on this subject. Prioritize academic sources over industry reports or expert analyses. For each source, provide:
+- Title of the academic paper/study
+- Authors and their academic affiliations
+- URL if available (preferably DOI or academic database links)
+- A comprehensive 1-paragraph summary of the key findings, methodology, and relevance to the research goal
 
-NEXT STEPS CONTEXT: After answering these questions, we will:
+BACKGROUND SUMMARY REQUIREMENT: Create a comprehensive background summary section (2-3 paragraphs) that synthesizes the key findings from the academic sources and provides context for the research. This should include:
+- Current state of knowledge on the topic
+- Key findings from recent academic research
+- Gaps in current understanding
+- Relevance to the research goal
+- Context for why this research is important
+
+RESEARCH DIRECTIONS QUESTION: Provide ONE question with a numbered list of possible research directions and ask the user to select which ones to include. For example:
+"Here are some research directions we could explore:
+1. Statistical analysis with detailed charts and graphs
+2. Machine learning model to predict future trends
+3. Historical data pattern analysis
+4. Real-time data insights
+5. Comparative analysis across different time periods
+6. Literature review and meta-analysis
+7. Experimental design and hypothesis testing
+8. Qualitative analysis and case studies
+
+Which of these research directions would you like us to include in our analysis? (You can select multiple numbers like '1, 3, 5, 7' or just one like '2')"
+
+NEXT STEPS CONTEXT: After selecting research directions, we will:
 1. Conduct the research and gather data
 2. Process and analyze the data
 3. Set up variables and data structures
 4. Write Python scripts for analysis
 5. Develop the resulting answer and write-up
 
-IMPORTANT: Focus ONLY on questions about:
-- What the user wants to accomplish (goals, objectives, desired outcomes)
-- How they want to approach the research (methodology preferences, tools, techniques)
-- What scope and boundaries they want to set (timeframe, data sources, depth of analysis)
-- What specific aspects they want to focus on or prioritize
-- What constraints or preferences they have (budget, time, technical requirements)
-
-DO NOT ask questions about:
-- Facts or data the user might not know
-- Technical details they may not be familiar with
-- Specific values or parameters they haven't provided
-
 Return ONLY a JSON object:
 {{
     "title": "Short Title Here",
+    "sources": [
+        {{
+            "title": "Academic Paper Title",
+            "authors": "Author Names, University/Institution",
+            "url": "https://doi.org/example.com/paper",
+            "summary": "One paragraph summary of key findings, methodology, and relevance to the research goal..."
+        }},
+        {{
+            "title": "Academic Study Title",
+            "authors": "Author Names, University/Institution",
+            "url": "https://doi.org/example.com/study",
+            "summary": "One paragraph summary of key findings, methodology, and relevance to the research goal..."
+        }},
+        {{
+            "title": "Scholarly Article Title",
+            "authors": "Author Names, University/Institution",
+            "url": "https://doi.org/example.com/article",
+            "summary": "One paragraph summary of key findings, methodology, and relevance to the research goal..."
+        }}
+    ],
+    "background_summary": "A comprehensive 2-3 paragraph background summary that synthesizes the key findings from the academic sources and provides context for the research. Include current state of knowledge, key findings from recent academic research, gaps in current understanding, relevance to the research goal, and context for why this research is important.",
     "questions": [
         {{
             "id": "q1",
-            "question": "Would you rather we do A) focus on statistical analysis with detailed charts and graphs, or B) create a machine learning model to predict future trends?",
-            "category": "scope",
-            "required": true
-        }},
-        {{
-            "id": "q2", 
-            "question": "Would you rather we do A) analyze historical data to identify patterns, or B) focus on real-time data for immediate insights?",
-            "category": "approach",
+            "question": "Here are some research directions we could explore:\n1. Statistical analysis with detailed charts and graphs\n2. Machine learning model to predict future trends\n3. Historical data pattern analysis\n4. Real-time data insights\n5. Comparative analysis across different time periods\n6. Literature review and meta-analysis\n7. Experimental design and hypothesis testing\n8. Qualitative analysis and case studies\n\nWhich of these research directions would you like us to include in our analysis? (You can select multiple numbers like '1, 3, 5, 7' or just one like '2')",
+            "category": "research_directions",
             "required": true
         }}
     ]
 }}
 
-Focus on questions that help clarify the user's goals and preferences for the research direction."#,
+Focus on academic rigor and comprehensive research planning."#,
         request.goal
     );
     
@@ -2990,22 +3075,42 @@ Focus on questions that help clarify the user's goals and preferences for the re
                     // Fallback response
                     serde_json::json!({
                         "title": "Research Project",
+                        "sources": [
+                            {
+                                "title": "Research Methodology Guide",
+                                "authors": "Academic Research Institute",
+                                "url": null,
+                                "summary": "A comprehensive guide to research methodologies and best practices for data analysis and interpretation."
+                            },
+                            {
+                                "title": "Industry Analysis Framework",
+                                "authors": "Business Intelligence Group",
+                                "url": null,
+                                "summary": "Framework for conducting thorough industry analysis with statistical and predictive modeling approaches."
+                            },
+                            {
+                                "title": "Data Science Best Practices",
+                                "authors": "Data Science Consortium",
+                                "url": null,
+                                "summary": "Best practices for data collection, analysis, and visualization in research projects."
+                            }
+                        ],
                         "questions": [
                             {
                                 "id": "q1",
-                                "question": "Would you rather we do A) focus on statistical analysis with detailed charts and graphs, or B) create a machine learning model to predict future trends?",
+                                "question": "Here are some research directions we could explore:\n1. Statistical analysis with detailed charts and graphs\n2. Machine learning model to predict future trends\n3. Historical data pattern analysis\n4. Real-time data insights\n5. Comparative analysis across different time periods\n\nWhich of these research directions would you like us to focus on? (You can select multiple numbers like '1, 3, 5' or just one like '2')",
                                 "category": "scope",
                                 "required": true
                             },
                             {
                                 "id": "q2",
-                                "question": "Would you rather we do A) analyze historical data to identify patterns, or B) focus on real-time data for immediate insights?",
+                                "question": "Here are some data analysis approaches we could use:\n1. Descriptive statistics and summary metrics\n2. Predictive modeling and forecasting\n3. Exploratory data analysis with visualizations\n4. Hypothesis testing and statistical inference\n5. Time series analysis and trend detection\n\nWhich analysis approaches interest you most? (Select numbers like '1, 3, 4')",
                                 "category": "approach", 
                                 "required": true
                             },
                             {
                                 "id": "q3",
-                                "question": "Would you rather we do A) focus on a broad overview of the topic, or B) dive deep into specific aspects that interest you most?",
+                                "question": "Here are some focus areas we could prioritize:\n1. Broad overview of the entire topic\n2. Deep dive into specific aspects\n3. Comparison between different approaches\n4. Practical applications and recommendations\n5. Future trends and predictions\n\nWhich focus areas would you like us to emphasize? (Select numbers like '2, 4')",
                                 "category": "scope",
                                 "required": false
                             }
@@ -3022,7 +3127,22 @@ Focus on questions that help clarify the user's goals and preferences for the re
     
     // Parse the response into our struct
     let title = response_json["title"].as_str().unwrap_or("Research Project").to_string();
+    
+    // Parse sources
     let empty_vec = vec![];
+    let sources_array = response_json["sources"].as_array().unwrap_or(&empty_vec);
+    
+    let sources: Vec<ResearchSource> = sources_array
+        .iter()
+        .map(|s| ResearchSource {
+            title: s["title"].as_str().unwrap_or("").to_string(),
+            authors: s["authors"].as_str().unwrap_or("").to_string(),
+            url: s["url"].as_str().map(|u| u.to_string()),
+            summary: s["summary"].as_str().unwrap_or("").to_string(),
+        })
+        .collect();
+    
+    // Parse questions
     let questions_array = response_json["questions"].as_array().unwrap_or(&empty_vec);
     
     let questions: Vec<ResearchQuestion> = questions_array
@@ -3037,6 +3157,7 @@ Focus on questions that help clarify the user's goals and preferences for the re
     
     let initialization = ResearchInitialization {
         title,
+        sources,
         questions,
     };
     

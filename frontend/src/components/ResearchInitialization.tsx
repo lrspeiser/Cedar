@@ -1,6 +1,13 @@
 import React, { useState } from 'react';
 import { apiService } from '../api';
 
+interface ResearchSource {
+  title: string;
+  authors: string;
+  url?: string;
+  summary: string;
+}
+
 interface ResearchQuestion {
   id: string;
   question: string;
@@ -10,6 +17,7 @@ interface ResearchQuestion {
 
 interface ResearchInitialization {
   title: string;
+  sources: ResearchSource[];
   questions: ResearchQuestion[];
 }
 
@@ -152,24 +160,64 @@ export const ResearchInitialization: React.FC<ResearchInitializationProps> = ({
         <div className="flex-1 overflow-y-auto p-6">
           <div className="max-w-4xl mx-auto">
             <div className="space-y-6">
-              {initialization.questions.map((question) => (
-                <div key={question.id} className="border-b border-gray-200 pb-4">
-                  <label className="block text-sm font-medium text-gray-700 mb-2">
-                    {question.question}
-                    {question.required && <span className="text-red-500 ml-1">*</span>}
-                  </label>
-                  <textarea
-                    value={answers[question.id] || ''}
-                    onChange={(e) => handleAnswerChange(question.id, e.target.value)}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-cedar-500"
-                    placeholder="Enter your answer..."
-                    rows={3}
-                  />
-                  <div className="mt-1 text-xs text-gray-500">
-                    Category: {question.category}
-                  </div>
+              {/* Research Sources Section */}
+              <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
+                <h3 className="text-lg font-semibold text-blue-800 mb-3">
+                  📚 Top Research Sources
+                </h3>
+                <div className="space-y-4">
+                  {initialization.sources.map((source, index) => (
+                    <div key={index} className="bg-white border border-blue-100 rounded-md p-3">
+                      <div className="flex items-start justify-between mb-2">
+                        <h4 className="font-medium text-gray-900">{source.title}</h4>
+                        <span className="text-xs text-gray-500 bg-gray-100 px-2 py-1 rounded">
+                          {index + 1}
+                        </span>
+                      </div>
+                      <p className="text-sm text-gray-600 mb-2">
+                        <span className="font-medium">Authors:</span> {source.authors}
+                      </p>
+                      {source.url && (
+                        <p className="text-sm text-blue-600 mb-2">
+                          <a href={source.url} target="_blank" rel="noopener noreferrer" className="hover:underline">
+                            🔗 View Source
+                          </a>
+                        </p>
+                      )}
+                      <p className="text-sm text-gray-700 leading-relaxed">
+                        {source.summary}
+                      </p>
+                    </div>
+                  ))}
                 </div>
-              ))}
+              </div>
+
+              {/* Questions Section */}
+              <div className="bg-gray-50 border border-gray-200 rounded-lg p-4">
+                <h3 className="text-lg font-semibold text-gray-800 mb-3">
+                  ❓ Research Questions
+                </h3>
+                <div className="space-y-4">
+                                    {initialization.questions.map((question) => (
+                    <div key={question.id} className="border-b border-gray-200 pb-4">
+                      <label className="block text-sm font-medium text-gray-700 mb-2">
+                        {question.question}
+                        {question.required && <span className="text-red-500 ml-1">*</span>}
+                      </label>
+                      <textarea
+                        value={answers[question.id] || ''}
+                        onChange={(e) => handleAnswerChange(question.id, e.target.value)}
+                        className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-cedar-500"
+                        placeholder="Enter your answer (e.g., '1, 3, 5' or '2')..."
+                        rows={3}
+                      />
+                      <div className="mt-1 text-xs text-gray-500">
+                        Category: {question.category}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
 
               {error && (
                 <div className="text-red-600 text-sm">{error}</div>

@@ -32,6 +32,8 @@ interface Project {
   libraries: any[];
   write_up: string;
   researchAnswers?: Record<string, string>;
+  session_id?: string;
+  session_status?: string;
 }
 
 interface ProjectViewProps {
@@ -91,11 +93,14 @@ const ProjectView: React.FC<ProjectViewProps> = ({ project, onBack }) => {
   };
 
   const renderTabContent = () => {
+    // Generate a persistent session ID based on project ID
+    const persistentSessionId = project.session_id || `session_${project.id}`;
+    
     switch (activeTab) {
       case 'notebook':
         return (
           <ResearchSession
-            sessionId={`session_${Date.now()}`}
+            sessionId={persistentSessionId}
             projectId={project.id}
             goal={project.goal}
             answers={researchAnswers}
@@ -158,7 +163,7 @@ const ProjectView: React.FC<ProjectViewProps> = ({ project, onBack }) => {
   };
 
   return (
-    <div className="flex flex-col h-screen bg-gray-50">
+    <div className="flex flex-col h-full bg-gray-50">
       {/* Header */}
       <div className="bg-white border-b border-gray-200 px-6 py-4">
         <div className="flex items-center justify-between">
@@ -256,7 +261,7 @@ const ProjectView: React.FC<ProjectViewProps> = ({ project, onBack }) => {
       </div>
 
       {/* Tab Content */}
-      <div className="flex-1 overflow-hidden">
+      <div className="flex-1 overflow-y-auto">
         {renderTabContent()}
       </div>
     </div>

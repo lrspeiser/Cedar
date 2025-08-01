@@ -61,7 +61,8 @@ const ReferencesTab: React.FC<ReferencesTabProps> = ({ projectId, references, on
   };
 
   return (
-    <div className="space-y-6">
+    <div className="h-full flex flex-col p-4">
+      <div className="flex-1 overflow-y-auto space-y-6">
       <div className="flex justify-between items-center">
         <h3 className="text-xl font-semibold text-gray-800">References</h3>
         <button
@@ -189,6 +190,7 @@ const ReferencesTab: React.FC<ReferencesTabProps> = ({ projectId, references, on
           ))}
         </div>
       )}
+      </div>
     </div>
   );
 };

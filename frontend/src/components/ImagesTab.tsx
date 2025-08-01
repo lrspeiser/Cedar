@@ -107,7 +107,8 @@ const ImagesTab: React.FC<ImagesTabProps> = ({ projectId, images, onImagesUpdate
   };
 
   return (
-    <div className="space-y-6">
+    <div className="h-full flex flex-col p-4">
+      <div className="flex-1 overflow-y-auto space-y-6">
       <div className="flex justify-between items-center">
         <h3 className="text-xl font-semibold text-gray-800">Charts & Visualizations</h3>
         <button
@@ -225,6 +226,7 @@ const ImagesTab: React.FC<ImagesTabProps> = ({ projectId, images, onImagesUpdate
           ))}
         </div>
       )}
+      </div>
     </div>
   );
 };

@@ -122,7 +122,8 @@ const LibrariesTab: React.FC<LibrariesTabProps> = ({ projectId }) => {
   }
 
   return (
-    <div className="p-6 space-y-6">
+    <div className="h-full flex flex-col p-4">
+      <div className="flex-1 overflow-y-auto space-y-6">
       {/* Header with actions */}
       <div className="flex justify-between items-center">
         <div>
@@ -371,6 +372,7 @@ const LibrariesTab: React.FC<LibrariesTabProps> = ({ projectId }) => {
           </p>
         </div>
       )}
+      </div>
     </div>
   );
 };

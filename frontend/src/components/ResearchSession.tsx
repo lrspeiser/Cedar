@@ -91,6 +91,13 @@ const ResearchSession: React.FC<ResearchSessionProps> = ({
     loadSession();
   }, [sessionId]);
 
+  // Save session whenever cells change
+  useEffect(() => {
+    if (cells.length > 0) {
+      saveSession(cells);
+    }
+  }, [cells]);
+
   // Manage execution monitoring
   useEffect(() => {
     let monitoringInterval: number | null = null;
@@ -139,6 +146,34 @@ const ResearchSession: React.FC<ResearchSessionProps> = ({
       }
     } catch (error) {
       console.error('Failed to load session:', error);
+    }
+  };
+
+  const saveSession = async (cells: Cell[]) => {
+    try {
+      // Convert cells to the format expected by the backend
+      const cellsJson = cells.map(cell => ({
+        id: cell.timestamp, // Use timestamp as ID
+        cell_type: cell.type === 'code' ? 'Code' : 'Text',
+        content: cell.content,
+        origin: 'user',
+        execution_result: cell.output,
+        metadata: {
+          timestamp: cell.timestamp,
+          status: cell.status || 'pending'
+        }
+      }));
+
+      await apiService.saveSession(sessionId, {
+        project_id: projectId,
+        goal: currentGoal,
+        plan_cells: cellsJson,
+        status: executionProgress.isExecuting ? 'executing' : 'completed',
+        execution_results: executionProgress.stepResults,
+        updated_at: new Date().toISOString()
+      });
+    } catch (error) {
+      console.error('Failed to save session:', error);
     }
   };
 
@@ -385,7 +420,7 @@ const ResearchSession: React.FC<ResearchSessionProps> = ({
   };
 
   return (
-    <div className="flex-1 overflow-y-auto p-4">
+    <div className="h-full flex flex-col p-4">
       {/* Research Goal Input */}
       <div className="mb-6">
         <h2 className="text-2xl font-bold text-gray-900 mb-4">Research Session</h2>
@@ -613,24 +648,26 @@ const ResearchSession: React.FC<ResearchSessionProps> = ({
       )}
 
       {/* Cells Display */}
-      <div className="space-y-4">
-        {cells.map((cell, index) => (
-          <CellComponent
-            key={index}
-            cell={cell}
-            onExecuteCode={executeCode}
-          />
-        ))}
-        
-        {cells.length === 0 && !isLoading && (
-          <div className="text-center py-12">
-            <div className="text-gray-400 text-6xl mb-4">🔬</div>
-            <h3 className="text-lg font-medium text-gray-900 mb-2">Ready to Research</h3>
-            <p className="text-gray-600">
-              Enter your research goal above to start an automated research session.
-            </p>
-          </div>
-        )}
+      <div className="flex-1 overflow-y-auto">
+        <div className="space-y-4">
+          {cells.map((cell, index) => (
+            <CellComponent
+              key={index}
+              cell={cell}
+              onExecuteCode={executeCode}
+            />
+          ))}
+          
+          {cells.length === 0 && !isLoading && (
+            <div className="text-center py-12">
+              <div className="text-gray-400 text-6xl mb-4">🔬</div>
+              <h3 className="text-lg font-medium text-gray-900 mb-2">Ready to Research</h3>
+              <p className="text-gray-600">
+                Enter your research goal above to start an automated research session.
+              </p>
+            </div>
+          )}
+        </div>
       </div>
     </div>
   );
