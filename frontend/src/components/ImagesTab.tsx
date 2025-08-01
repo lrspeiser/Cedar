@@ -35,6 +35,9 @@ const ImagesTab: React.FC<ImagesTabProps> = ({ projectId, images, onImagesUpdate
   const [Plotly, setPlotly] = useState<any>(null);
 
   useEffect(() => {
+    // Temporarily disabled visualization libraries to fix build issues
+    // TODO: Re-enable when dependency issues are resolved
+    /*
     // Load Vega-Lite
     import('vega-embed').then((module) => {
       setVegaEmbed(module.default);
@@ -44,6 +47,7 @@ const ImagesTab: React.FC<ImagesTabProps> = ({ projectId, images, onImagesUpdate
     import('plotly.js-dist').then((module) => {
       setPlotly(module);
     }).catch(console.error);
+    */
   }, []);
 
   const createImage = async () => {
@@ -122,22 +126,13 @@ const ImagesTab: React.FC<ImagesTabProps> = ({ projectId, images, onImagesUpdate
   };
 
   const renderVegaLiteChart = (spec: any, containerId: string) => {
-    if (!vegaEmbed) return;
-    
-    vegaEmbed(`#${containerId}`, spec, {
-      actions: false,
-      theme: 'default'
-    }).catch(console.error);
+    // Temporarily disabled
+    console.log('Vega-Lite rendering disabled for now');
   };
 
   const renderPlotlyChart = (data: any, layout: any, containerId: string) => {
-    if (!Plotly) return;
-    
-    Plotly.newPlot(containerId, data, layout, {
-      displayModeBar: true,
-      displaylogo: false,
-      modeBarButtonsToRemove: ['pan2d', 'lasso2d', 'select2d']
-    });
+    // Temporarily disabled
+    console.log('Plotly rendering disabled for now');
   };
 
   const renderVisualization = (visualization: Visualization) => {

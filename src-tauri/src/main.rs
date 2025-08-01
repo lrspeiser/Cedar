@@ -635,7 +635,7 @@ fn create_duckdb_connection(project_id: &str) -> Result<(), String> {
 }
 
 /// Helper function to execute DuckDB query
-async fn execute_duckdb_query(project_id: &str, query: &str) -> Result<Vec<Vec<String>>, String> {
+async fn execute_duckdb_query_helper(project_id: &str, query: &str) -> Result<Vec<Vec<String>>, String> {
     // Temporarily disabled until DuckDB is properly configured
     Err("DuckDB not available".to_string())
 }
@@ -4452,14 +4452,18 @@ async fn execute_duckdb_query(
     println!("🗄️ Backend: Executing DuckDB query on table: {} in project: {}", request.table_name, request.project_id);
     
     // Execute the query
-    let results = execute_duckdb_query(&request.project_id, &request.query)
+    let results = execute_duckdb_query_helper(&request.project_id, &request.query)
         .await
         .map_err(|e| format!("Query execution failed: {}", e))?;
     
     println!("✅ Backend: DuckDB query executed successfully");
     
+    // Convert results to JSON-compatible format
+    let results_json = serde_json::to_value(&results)
+        .map_err(|e| format!("Failed to serialize results: {}", e))?;
+    
     Ok(serde_json::json!({
-        "results": results,
+        "results": results_json,
         "row_count": if results.len() > 1 { results.len() - 1 } else { 0 },
         "column_count": if !results.is_empty() { results[0].len() } else { 0 },
         "message": "Query executed successfully"

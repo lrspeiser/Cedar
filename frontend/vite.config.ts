@@ -1,15 +1,35 @@
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 
-// https://vitejs.dev/config/
-export default defineConfig({
+// https://vite.dev/config/
+export default defineConfig(async () => ({
   plugins: [react()],
+
+  // Vite options tailored for Tauri development and used on production and preview by the CLI
+  //
+  // 1. prevent vite from obscuring rust errors
+  clearScreen: false,
+  // 2. tauri expects a fixed port, fail if that port is not available
   server: {
     port: 3000,
-    host: true
+    strictPort: true,
+    watch: {
+      // 3. tell vite to ignore watching `src-tauri`
+      ignored: ["**/src-tauri/**"],
+    },
   },
+  // 4. to make use of `TAURI_DEBUG` and other env variables
+  // https://tauri.studio/v1/api/config#buildconfig.beforedevcommand
+  envPrefix: ['VITE_', 'TAURI_'],
   build: {
-    outDir: 'dist',
-    sourcemap: true
-  }
-}) 
+    // Tauri supports es2021
+    target: process.env.TAURI_PLATFORM == 'windows' ? 'chrome105' : 'safari13',
+    // don't minify for debug builds
+    minify: !process.env.TAURI_DEBUG ? 'esbuild' : false,
+    // produce sourcemaps for debug builds
+    sourcemap: !!process.env.TAURI_DEBUG,
+    rollupOptions: {
+      external: ['vega', 'vega-lite'],
+    },
+  },
+})) 
