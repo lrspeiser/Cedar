@@ -155,6 +155,8 @@ interface ResearchSessionProps {
   onDataRouted?: (result: DataRouterResult) => void;
   isResearchStarting?: boolean;
   onSessionLoaded?: () => void;
+  pendingNotebookEntry?: any;
+  onNotebookEntryAdded?: () => void;
 }
 
 // Data Router Service
@@ -408,7 +410,9 @@ const ResearchSession: React.FC<ResearchSessionProps> = ({
   goal,
   onDataRouted,
   isResearchStarting = false,
-  onSessionLoaded
+  onSessionLoaded,
+  pendingNotebookEntry,
+  onNotebookEntryAdded
 }) => {
   const [cells, setCells] = useState<Cell[]>([]);
   const [isLoading, setIsLoading] = useState(false);
@@ -546,6 +550,32 @@ const ResearchSession: React.FC<ResearchSessionProps> = ({
       saveThreads();
     };
   }, [sessionId, executionThreads]);
+
+  // Handle pending notebook entry from data tab
+  useEffect(() => {
+    if (pendingNotebookEntry) {
+      console.log('📝 Adding pending notebook entry:', pendingNotebookEntry);
+      
+      const newCell: Cell = {
+        id: `data-upload-${Date.now()}`,
+        type: pendingNotebookEntry.type as any,
+        content: pendingNotebookEntry.content,
+        timestamp: new Date().toISOString(),
+        status: 'completed',
+        metadata: pendingNotebookEntry.metadata
+      };
+      
+      setCells(prev => [...prev, newCell]);
+      
+      // Save the session with the new cell
+      saveSession([...cells, newCell]);
+      
+      // Notify that the entry has been added
+      if (onNotebookEntryAdded) {
+        onNotebookEntryAdded();
+      }
+    }
+  }, [pendingNotebookEntry]);
 
   const loadSession = async () => {
     try {
@@ -1797,20 +1827,54 @@ const ResearchSession: React.FC<ResearchSessionProps> = ({
     const threadId = createExecutionThread(codeCell.id, totalSteps);
 
     try {
-      // Update cell status to active
+      // Update cell status to active and start streaming
       const updatedCells = cells.map(cell => 
         cell.id === codeCell.id 
-          ? { ...cell, status: 'active' as const }
+          ? { 
+              ...cell, 
+              status: 'active' as const,
+              metadata: {
+                ...cell.metadata,
+                isStreaming: true,
+                streamLines: ['🚀 Starting code execution...']
+              }
+            }
           : cell
       );
       setCells(updatedCells);
       await saveSession(updatedCells);
 
-      // Execute the code
+      // Start streaming execution logs
+      startStreaming(codeCell.id);
+      
+      // Stream initial messages
+      await streamLines(codeCell.id, [
+        '🔧 Executing Python code...',
+        '📊 Collecting execution logs...',
+        '🤖 Preparing for LLM evaluation...'
+      ], 500);
+
+      // Execute the code with enhanced logging
       const result = await apiService.executeCode({
         code: codeCell.content,
         sessionId,
       });
+
+      // Stream execution results
+      const logs = result.logs || [];
+      if (logs.length > 0) {
+        await streamLines(codeCell.id, [
+          '📋 Execution Logs:',
+          ...logs.map(log => `  ${log}`),
+          '',
+          '✅ Code execution completed successfully!'
+        ], 200);
+      } else {
+        await streamLines(codeCell.id, [
+          '✅ Code execution completed successfully!',
+          `📊 Output: ${result.output || 'No output generated'}`
+        ], 200);
+      }
 
       // Update thread progress
       updateExecutionThread(threadId, {
@@ -1821,7 +1885,32 @@ const ResearchSession: React.FC<ResearchSessionProps> = ({
         },
       });
 
-      // Generate result cell
+      // Stream LLM evaluation
+      await streamLines(codeCell.id, [
+        '🤖 Evaluating results with AI...',
+        '💭 Analyzing execution output...',
+        '🎯 Generating recommendations...'
+      ], 300);
+
+      // Generate LLM evaluation and recommendations
+      const evaluationResult = await generateCodeEvaluation(codeCell, result);
+
+      // Stream evaluation results
+      await streamLines(codeCell.id, [
+        '📝 AI Evaluation:',
+        evaluationResult.assessment,
+        '',
+        '🎯 Recommended Next Steps:',
+        ...evaluationResult.recommendations.map(rec => `  • ${rec}`),
+        '',
+        '💡 Issues Found:',
+        ...evaluationResult.issues.map(issue => `  • ${issue}`)
+      ], 200);
+
+      // Stop streaming
+      stopStreaming(codeCell.id);
+
+      // Generate result cell with evaluation
       const resultCell: Cell = {
         id: `result-${Date.now()}`,
         type: 'result',
@@ -1835,13 +1924,21 @@ const ResearchSession: React.FC<ResearchSessionProps> = ({
           stepOrder: codeCell.metadata?.stepOrder || 0,
           totalSteps: codeCell.metadata?.totalSteps || 0,
           threadId, // Store thread ID for reference
+          llmEvaluation: evaluationResult,
         },
       };
 
       // Update original cell status
       const finalCells = updatedCells.map(cell => 
         cell.id === codeCell.id 
-          ? { ...cell, status: 'completed' as const }
+          ? { 
+              ...cell, 
+              status: 'completed' as const,
+              metadata: {
+                ...cell.metadata,
+                isStreaming: false
+              }
+            }
           : cell
       );
 
@@ -1856,7 +1953,7 @@ const ResearchSession: React.FC<ResearchSessionProps> = ({
       // Route data from result cell
       await routeCellData(resultCell);
 
-      // Generate next step or writeup
+      // Generate next step or writeup based on LLM evaluation
       const nextCell = await generateNextStepOrWriteup(resultCell);
       if (nextCell) {
         const cellsWithNext = [...cellsWithResult, nextCell];
@@ -1875,10 +1972,28 @@ const ResearchSession: React.FC<ResearchSessionProps> = ({
     } catch (error) {
       console.error('Failed to execute code:', error);
       
+      // Stream error message
+      await streamLines(codeCell.id, [
+        '❌ Code execution failed:',
+        error instanceof Error ? error.message : 'Unknown error',
+        '',
+        '🔧 Please review the code and try again.'
+      ], 200);
+      
+      // Stop streaming
+      stopStreaming(codeCell.id);
+      
       // Update cell status to error
       const updatedCells = cells.map(cell => 
         cell.id === codeCell.id 
-          ? { ...cell, status: 'error' as const }
+          ? { 
+              ...cell, 
+              status: 'error' as const,
+              metadata: {
+                ...cell.metadata,
+                isStreaming: false
+              }
+            }
           : cell
       );
       setCells(updatedCells);

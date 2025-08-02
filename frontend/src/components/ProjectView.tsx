@@ -4,9 +4,8 @@ import ResearchSession from './ResearchSession';
 import DataTab from './DataTab';
 import ImagesTab from './ImagesTab';
 import ReferencesTab from './ReferencesTab';
-import VariablesTab from './VariablesTab';
+import CodeTab from './CodeTab';
 import QuestionsTab from './QuestionsTab';
-import LibrariesTab from './LibrariesTab';
 import WriteUpTab from './WriteUpTab';
 
 interface Visualization {
@@ -41,7 +40,7 @@ interface ProjectViewProps {
   onBack: () => void;
 }
 
-type TabType = 'notebook' | 'questions' | 'libraries' | 'data' | 'images' | 'references' | 'variables' | 'write-up';
+type TabType = 'notebook' | 'questions' | 'code' | 'data' | 'images' | 'references' | 'write-up';
 
 const ProjectView: React.FC<ProjectViewProps> = ({ project, onBack }) => {
   const [activeTab, setActiveTab] = useState<TabType>('notebook');
@@ -54,6 +53,7 @@ const ProjectView: React.FC<ProjectViewProps> = ({ project, onBack }) => {
   const [isGeneratingTitle, setIsGeneratingTitle] = useState(false);
   const [showGoalInput, setShowGoalInput] = useState(!project.goal);
   const [isResearchStarting, setIsResearchStarting] = useState(false);
+  const [pendingNotebookEntry, setPendingNotebookEntry] = useState<any>(null);
 
   // Auto-switch to notebook tab if project has an active session
   useEffect(() => {
@@ -98,11 +98,10 @@ const ProjectView: React.FC<ProjectViewProps> = ({ project, onBack }) => {
   const tabs = [
     { id: 'notebook', label: 'Notebook', icon: '📓' },
     { id: 'questions', label: 'Questions', icon: '❓' },
-    { id: 'libraries', label: 'Libraries', icon: '📦' },
+    { id: 'code', label: 'Code', icon: '💻' },
     { id: 'data', label: 'Data', icon: '📊' },
     { id: 'images', label: 'Images', icon: '🖼️' },
     { id: 'references', label: 'References', icon: '📚' },
-    { id: 'variables', label: 'Variables', icon: '📊' },
     { id: 'write-up', label: 'Write-Up', icon: '✍️' },
   ];
 
@@ -221,6 +220,8 @@ const ProjectView: React.FC<ProjectViewProps> = ({ project, onBack }) => {
                 refreshProjectData();
               }
             }}
+            pendingNotebookEntry={pendingNotebookEntry}
+            onNotebookEntryAdded={() => setPendingNotebookEntry(null)}
           />
         );
       case 'questions':
@@ -229,9 +230,9 @@ const ProjectView: React.FC<ProjectViewProps> = ({ project, onBack }) => {
             projectId={project.id}
           />
         );
-      case 'libraries':
+      case 'code':
         return (
-          <LibrariesTab
+          <CodeTab
             projectId={project.id}
           />
         );
@@ -241,6 +242,12 @@ const ProjectView: React.FC<ProjectViewProps> = ({ project, onBack }) => {
             projectId={project.id}
             dataFiles={projectData.data_files}
             onDataFilesUpdate={(files) => console.log('Data files updated:', files)}
+            onAddNotebookEntry={(entry) => {
+              console.log('Data tab wants to add notebook entry:', entry);
+              setPendingNotebookEntry(entry);
+              // Switch to notebook tab to show the new entry
+              setActiveTab('notebook');
+            }}
           />
         );
       case 'images':
@@ -259,12 +266,7 @@ const ProjectView: React.FC<ProjectViewProps> = ({ project, onBack }) => {
             onReferencesUpdate={(references) => console.log('References updated:', references)}
           />
         );
-      case 'variables':
-        return (
-          <VariablesTab
-            projectId={project.id}
-          />
-        );
+
       case 'write-up':
         return (
           <WriteUpTab

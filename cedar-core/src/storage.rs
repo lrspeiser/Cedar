@@ -1,6 +1,5 @@
 use serde::{Deserialize, Serialize};
 use std::fs;
-use std::path::Path;
 
 pub fn data_root() -> std::path::PathBuf {
     dirs::data_dir()
@@ -90,6 +89,116 @@ pub struct Visualization {
     pub layout: Option<serde_json::Value>, // Plotly layout
     pub project_id: String,
     pub session_id: Option<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct DataAnalysisCell {
+    pub id: String,
+    pub project_id: String,
+    pub type_: String, // 'data_analysis', 'rust_analysis', 'llm_analysis'
+    pub content: String,
+    pub timestamp: String,
+    pub status: String, // 'pending', 'active', 'completed', 'error'
+    pub metadata: Option<serde_json::Value>,
+    pub rust_analysis: Option<serde_json::Value>,
+    pub llm_analysis: Option<serde_json::Value>,
+    pub stream_lines: Option<Vec<String>>,
+    pub is_streaming: bool,
+}
+
+impl DataAnalysisCell {
+    pub fn new(project_id: &str, type_: &str) -> Self {
+        Self {
+            id: uuid::Uuid::new_v4().to_string(),
+            project_id: project_id.to_string(),
+            type_: type_.to_string(),
+            content: String::new(),
+            timestamp: chrono::Utc::now().to_rfc3339(),
+            status: "pending".to_string(),
+            metadata: None,
+            rust_analysis: None,
+            llm_analysis: None,
+            stream_lines: None,
+            is_streaming: false,
+        }
+    }
+
+    pub fn save(&self) -> Result<(), String> {
+        let path = data_root().join("analysis_cells").join(format!("{}.json", self.id));
+        if let Some(parent) = path.parent() {
+            fs::create_dir_all(parent)
+                .map_err(|e| format!("Failed to create directory: {}", e))?;
+        }
+        
+        let json = serde_json::to_string_pretty(self)
+            .map_err(|e| format!("Failed to serialize analysis cell: {}", e))?;
+        
+        fs::write(&path, json)
+            .map_err(|e| format!("Failed to save analysis cell: {}", e))?;
+        
+        Ok(())
+    }
+
+    pub fn load(id: &str) -> Result<Option<Self>, String> {
+        let path = data_root().join("analysis_cells").join(format!("{}.json", id));
+        if !path.exists() {
+            return Ok(None);
+        }
+        
+        let content = fs::read_to_string(&path)
+            .map_err(|e| format!("Failed to read analysis cell: {}", e))?;
+        
+        let cell: DataAnalysisCell = serde_json::from_str(&content)
+            .map_err(|e| format!("Failed to deserialize analysis cell: {}", e))?;
+        
+        Ok(Some(cell))
+    }
+
+    pub fn list_by_project(project_id: &str) -> Result<Vec<Self>, String> {
+        let cells_dir = data_root().join("analysis_cells");
+        if !cells_dir.exists() {
+            return Ok(Vec::new());
+        }
+
+        let mut cells = Vec::new();
+        for entry in fs::read_dir(cells_dir)
+            .map_err(|e| format!("Failed to read analysis cells directory: {}", e))? {
+            let entry = entry.map_err(|e| format!("Failed to read directory entry: {}", e))?;
+            let path = entry.path();
+            
+            if path.extension().and_then(|s| s.to_str()) == Some("json") {
+                if let Ok(cell) = Self::load(path.file_stem().unwrap().to_str().unwrap()) {
+                    if let Some(cell) = cell {
+                        if cell.project_id == project_id {
+                            cells.push(cell);
+                        }
+                    }
+                }
+            }
+        }
+
+        // Sort by timestamp (newest first)
+        cells.sort_by(|a, b| b.timestamp.cmp(&a.timestamp));
+        Ok(cells)
+    }
+
+    pub fn delete(&self) -> Result<(), String> {
+        let path = data_root().join("analysis_cells").join(format!("{}.json", self.id));
+        if path.exists() {
+            fs::remove_file(&path)
+                .map_err(|e| format!("Failed to delete analysis cell: {}", e))?;
+        }
+        Ok(())
+    }
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct DataAnalysisCellResult {
+    pub cell_id: String,
+    pub status: String,
+    pub output: Option<serde_json::Value>,
+    pub error: Option<String>,
+    pub timestamp: String,
 }
 
 impl DatasetManifest {
@@ -693,4 +802,61 @@ ORDER BY ordinal_position;
 /// Get DuckDB query for sample data
 pub fn get_sample_data_query(table_name: &str, limit: usize) -> String {
     format!("SELECT * FROM {} LIMIT {};", table_name, limit)
+}
+
+// Analysis cell management functions
+pub fn save_analysis_cell(cell: &DataAnalysisCell) -> Result<(), String> {
+    cell.save()
+}
+
+pub fn load_analysis_cell(id: &str) -> Result<Option<DataAnalysisCell>, String> {
+    DataAnalysisCell::load(id)
+}
+
+pub fn list_analysis_cells(project_id: &str) -> Result<Vec<DataAnalysisCell>, String> {
+    DataAnalysisCell::list_by_project(project_id)
+}
+
+pub fn delete_analysis_cell(cell: &DataAnalysisCell) -> Result<(), String> {
+    cell.delete()
+}
+
+pub fn update_analysis_cell_status(cell_id: &str, status: &str) -> Result<(), String> {
+    if let Some(mut cell) = DataAnalysisCell::load(cell_id)? {
+        cell.status = status.to_string();
+        cell.timestamp = chrono::Utc::now().to_rfc3339();
+        cell.save()
+    } else {
+        Err("Analysis cell not found".to_string())
+    }
+}
+
+pub fn update_analysis_cell_content(cell_id: &str, content: &str) -> Result<(), String> {
+    if let Some(mut cell) = DataAnalysisCell::load(cell_id)? {
+        cell.content = content.to_string();
+        cell.timestamp = chrono::Utc::now().to_rfc3339();
+        cell.save()
+    } else {
+        Err("Analysis cell not found".to_string())
+    }
+}
+
+pub fn add_rust_analysis_to_cell(cell_id: &str, rust_analysis: serde_json::Value) -> Result<(), String> {
+    if let Some(mut cell) = DataAnalysisCell::load(cell_id)? {
+        cell.rust_analysis = Some(rust_analysis);
+        cell.timestamp = chrono::Utc::now().to_rfc3339();
+        cell.save()
+    } else {
+        Err("Analysis cell not found".to_string())
+    }
+}
+
+pub fn add_llm_analysis_to_cell(cell_id: &str, llm_analysis: serde_json::Value) -> Result<(), String> {
+    if let Some(mut cell) = DataAnalysisCell::load(cell_id)? {
+        cell.llm_analysis = Some(llm_analysis);
+        cell.timestamp = chrono::Utc::now().to_rfc3339();
+        cell.save()
+    } else {
+        Err("Analysis cell not found".to_string())
+    }
 }

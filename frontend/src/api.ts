@@ -1390,6 +1390,158 @@ class ApiService {
     }
   }
 
+  async searchWebReferences(request: {
+    query: string;
+    projectId: string;
+    existingReferences?: any[];
+  }) {
+    try {
+      console.log('🔍 Searching web for references:', request.query);
+      
+      // Build context from existing references
+      const existingContext = request.existingReferences && request.existingReferences.length > 0 
+        ? `\n\nExisting references in this project:\n${request.existingReferences.map(ref => 
+            `- ${ref.title} by ${ref.authors} (${ref.url || 'no URL'})`
+          ).join('\n')}\n\nPlease find additional, different sources that complement these existing references.`
+        : '';
+
+      const searchPrompt = `Search the web for academic references, papers, and authoritative sources related to: "${request.query}"
+
+Focus on finding high-quality, recent academic sources including:
+- Peer-reviewed journal articles
+- Conference papers
+- Academic books and book chapters
+- Government or institutional reports
+- Preprints from reputable repositories (arXiv, bioRxiv, etc.)
+
+${existingContext}
+
+Please provide a comprehensive search with proper citations and URLs.`;
+
+      // Use the proper OpenAI web search API
+      const response = await this.callLLMWithWebSearch({
+        prompt: searchPrompt,
+        context: `Web search for academic references related to: ${request.query}`,
+        userComment: `Find relevant academic sources for: ${request.query}`
+      });
+
+      // Parse the web search response to extract references
+      const references = this.parseWebSearchResponse(response);
+      
+      console.log('✅ Web search completed, found references:', references);
+      return { references };
+      
+    } catch (error) {
+      console.error('❌ Failed to search web for references:', error);
+      throw error;
+    }
+  }
+
+  async callLLMWithWebSearch(request: {
+    prompt: string;
+    context?: string;
+    userComment?: string;
+  }) {
+    try {
+      console.log('🌐 Making LLM call with web search:', request);
+      
+      // This would need to be implemented in the backend to use the proper OpenAI API
+      // For now, we'll use a fallback approach
+      const response = await invoke('call_llm_with_web_search', {
+        prompt: request.prompt,
+        context: request.context || '',
+        userComment: request.userComment || ''
+      });
+      
+      console.log('✅ Web search LLM call completed successfully:', response);
+      return response;
+    } catch (error) {
+      console.error('❌ Failed to make web search LLM call:', error);
+      // Fallback to regular LLM call
+      return this.callLLM(request);
+    }
+  }
+
+  parseWebSearchResponse(response: any) {
+    try {
+      const responseText = (response as any).response || JSON.stringify(response);
+      
+      // Try to extract URLs and citations from the response
+      const urlRegex = /https?:\/\/[^\s\)]+/g;
+      const urls = responseText.match(urlRegex) || [];
+      
+      // Try to extract structured information
+      const references = [];
+      
+      // Look for patterns that might indicate academic sources
+      const lines = responseText.split('\n');
+      let currentReference = null;
+      
+      for (const line of lines) {
+        const trimmedLine = line.trim();
+        
+        // Look for title patterns
+        if (trimmedLine.match(/^["""].*["""]$/) || trimmedLine.match(/^[A-Z][^.!?]*$/)) {
+          if (currentReference) {
+            references.push(currentReference);
+          }
+          currentReference = {
+            title: trimmedLine.replace(/["""]/g, ''),
+            authors: 'Unknown',
+            url: '',
+            content: '',
+            source: 'web_search'
+          };
+        }
+        // Look for author patterns
+        else if (trimmedLine.match(/by\s+[A-Z][a-z]+\s+[A-Z]/) || trimmedLine.match(/^[A-Z][a-z]+\s+[A-Z]/)) {
+          if (currentReference) {
+            currentReference.authors = trimmedLine.replace(/^by\s+/, '');
+          }
+        }
+        // Look for URL patterns
+        else if (trimmedLine.match(/https?:\/\//)) {
+          if (currentReference) {
+            currentReference.url = trimmedLine;
+          }
+        }
+        // Look for content/summary
+        else if (trimmedLine.length > 20 && currentReference) {
+          currentReference.content = trimmedLine;
+        }
+      }
+      
+      // Add the last reference if exists
+      if (currentReference) {
+        references.push(currentReference);
+      }
+      
+      // If we found structured references, return them
+      if (references.length > 0) {
+        return references;
+      }
+      
+      // Fallback: create a single reference from the response
+      return [{
+        title: "Web Search Results",
+        authors: "Various Authors",
+        url: urls[0] || "",
+        content: responseText.substring(0, 500) + (responseText.length > 500 ? "..." : ""),
+        source: "web_search"
+      }];
+      
+    } catch (parseError) {
+      console.error('❌ Failed to parse web search response:', parseError);
+      return [{
+        title: "Web Search Results",
+        authors: "Various Authors",
+        url: "",
+        content: "Failed to parse web search response. Please review manually.",
+        source: "web_search"
+      }];
+    }
+  }
+
   // API Testing Functions
   async testApiEndpoint(request: { endpoint: string; method: string; data?: any }) {
     console.log('🧪 Testing API endpoint:', request);
@@ -1413,6 +1565,118 @@ class ApiService {
       return result;
     } catch (error) {
       console.error('❌ API test suite failed:', error);
+      throw error;
+    }
+  }
+
+  // Analysis Cell Management
+  async createAnalysisCell(request: { projectId: string; type: string }) {
+    try {
+      console.log('📝 Creating analysis cell...');
+      const response = await invoke('create_analysis_cell', {
+        project_id: request.projectId,
+        type_: request.type
+      });
+      console.log('✅ Analysis cell created:', response);
+      return response;
+    } catch (error) {
+      console.error('❌ Failed to create analysis cell:', error);
+      throw error;
+    }
+  }
+
+  async saveAnalysisCell(request: { cell: any }) {
+    try {
+      console.log('💾 Saving analysis cell...');
+      const response = await invoke('save_analysis_cell', request);
+      console.log('✅ Analysis cell saved:', response);
+      return response;
+    } catch (error) {
+      console.error('❌ Failed to save analysis cell:', error);
+      throw error;
+    }
+  }
+
+  async loadAnalysisCell(request: { id: string }) {
+    try {
+      console.log('📖 Loading analysis cell...');
+      const response = await invoke('load_analysis_cell', request);
+      console.log('✅ Analysis cell loaded:', response);
+      return response;
+    } catch (error) {
+      console.error('❌ Failed to load analysis cell:', error);
+      throw error;
+    }
+  }
+
+  async listAnalysisCells(request: { projectId: string }) {
+    try {
+      console.log('📋 Listing analysis cells...');
+      const response = await invoke('list_analysis_cells', request);
+      console.log('✅ Analysis cells listed:', response);
+      return response;
+    } catch (error) {
+      console.error('❌ Failed to list analysis cells:', error);
+      throw error;
+    }
+  }
+
+  async deleteAnalysisCell(request: { id: string }) {
+    try {
+      console.log('🗑️ Deleting analysis cell...');
+      const response = await invoke('delete_analysis_cell', request);
+      console.log('✅ Analysis cell deleted:', response);
+      return response;
+    } catch (error) {
+      console.error('❌ Failed to delete analysis cell:', error);
+      throw error;
+    }
+  }
+
+  async updateAnalysisCellStatus(request: { id: string; status: string }) {
+    try {
+      console.log('🔄 Updating analysis cell status...');
+      const response = await invoke('update_analysis_cell_status', request);
+      console.log('✅ Analysis cell status updated:', response);
+      return response;
+    } catch (error) {
+      console.error('❌ Failed to update analysis cell status:', error);
+      throw error;
+    }
+  }
+
+  async updateAnalysisCellContent(request: { id: string; content: string }) {
+    try {
+      console.log('📝 Updating analysis cell content...');
+      const response = await invoke('update_analysis_cell_content', request);
+      console.log('✅ Analysis cell content updated:', response);
+      return response;
+    } catch (error) {
+      console.error('❌ Failed to update analysis cell content:', error);
+      throw error;
+    }
+  }
+
+  async addRustAnalysisToCell(request: { id: string; rustAnalysis: any }) {
+    try {
+      console.log('🔧 Adding Rust analysis to cell...');
+      const response = await invoke('add_rust_analysis_to_cell', request);
+      console.log('✅ Rust analysis added to cell:', response);
+      return response;
+    } catch (error) {
+      console.error('❌ Failed to add Rust analysis to cell:', error);
+      throw error;
+    }
+  }
+
+  async addLlmAnalysisToCell(request: { id: string; llmAnalysis: any }) {
+    try {
+      console.log('🤖 Adding LLM analysis to cell...');
+      const response = await invoke('add_llm_analysis_to_cell', request);
+      console.log('✅ LLM analysis added to cell:', response);
+      return response;
+    } catch (error) {
+      console.error('❌ Failed to add LLM analysis to cell:', error);
       throw error;
     }
   }

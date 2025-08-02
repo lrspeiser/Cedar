@@ -4,8 +4,7 @@
 #[cfg(test)]
 mod tests;
 
-#[macro_use]
-use tauri::{State, command};
+use tauri::State;
 use serde::{Deserialize, Serialize};
 use serde_json::Value as JsonValue;
 use std::sync::Mutex;
@@ -14,7 +13,7 @@ use std::env;
 use std::io::{self, Write};
 use cedar::{cell, agent, context, executor, llm, storage};
 use cedar::executor::{ExecutionResult, StepEvaluation};
-use cedar::storage::{DataFileInfo, ColumnInfo, DataAnalysisRequest, DataAnalysisResponse, ColumnAnalysis, Visualization, create_duckdb_table};
+use cedar::storage::{DataFileInfo, ColumnInfo, DataAnalysisRequest, DataAnalysisResponse, ColumnAnalysis, Visualization, create_duckdb_table, DataAnalysisCell};
 use std::fs;
 use std::path::PathBuf;
 use uuid::Uuid;
@@ -5969,6 +5968,65 @@ async fn call_llm(
         }
     }
 }
+
+struct CallLLMWithWebSearchRequest {
+    prompt: String,
+    context: Option<String>,
+    user_comment: Option<String>,
+}
+
+#[tauri::command]
+async fn call_llm_with_web_search(
+    request: CallLLMWithWebSearchRequest,
+    state: State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    println!("🌐 Backend: Making LLM call with web search");
+    
+    // Get API key
+    let api_key = {
+        let api_key_guard = state.api_key.lock().unwrap();
+        api_key_guard.clone().ok_or("API key not set")?
+    };
+    
+    // Build the full prompt with context
+    let mut full_prompt = request.prompt.clone();
+    
+    if let Some(context) = request.context {
+        if !context.is_empty() {
+            full_prompt = format!("Context:\n{}\n\nTask:\n{}", context, full_prompt);
+        }
+    }
+    
+    if let Some(comment) = request.user_comment {
+        if !comment.is_empty() {
+            full_prompt = format!("{}\n\nUser Comment:\n{}", full_prompt, comment);
+        }
+    }
+    
+    // Set the API key environment variable for the LLM module
+    std::env::set_var("OPENAI_API_KEY", &api_key);
+    
+    // For now, we'll use the regular LLM call as a fallback
+    // TODO: Implement proper web search when OpenAI's web search API is available
+    match llm::ask_llm(&full_prompt).await {
+        Ok(response) => {
+            println!("✅ Backend: Web search LLM call completed successfully");
+            
+            // Try to parse as JSON first, if that fails return as plain text
+            match serde_json::from_str::<serde_json::Value>(&response) {
+                Ok(json_response) => Ok(json_response),
+                Err(_) => Ok(serde_json::json!({
+                    "response": response
+                }))
+            }
+        }
+        Err(e) => {
+            println!("❌ Backend: Web search LLM call failed: {}", e);
+            Err(format!("Web search LLM call failed: {}", e))
+        }
+    }
+}
+
     println!("🧪 Running CLI test: {}", request.command);
     
     match request.command.as_str() {
@@ -6276,9 +6334,21 @@ fn main() {
             // execute_duckdb_query,
             // list_data_files,
             // call_llm,
+            // call_llm_with_web_search,
             // API Testing endpoints
             test_api_endpoint,
             run_test_suite,
+            
+            // Analysis Cell Management endpoints
+            create_analysis_cell,
+            save_analysis_cell,
+            load_analysis_cell,
+            list_analysis_cells,
+            delete_analysis_cell,
+            update_analysis_cell_status,
+            update_analysis_cell_content,
+            add_rust_analysis_to_cell,
+            add_llm_analysis_to_cell,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
@@ -6467,4 +6537,79 @@ Focus on identifying actual data structures (DataFrames, arrays, lists, etc.) th
     
     println!("✅ Data stored successfully in table: {}", table_name);
     Ok(())
+}
+
+// Analysis cell management commands
+#[tauri::command]
+async fn create_analysis_cell(
+    project_id: String,
+    type_: String,
+) -> Result<DataAnalysisCell, String> {
+    let cell = DataAnalysisCell::new(&project_id, &type_);
+    cell.save()?;
+    Ok(cell)
+}
+
+#[tauri::command]
+async fn save_analysis_cell(
+    cell: DataAnalysisCell,
+) -> Result<(), String> {
+    cell.save()
+}
+
+#[tauri::command]
+async fn load_analysis_cell(
+    id: String,
+) -> Result<Option<DataAnalysisCell>, String> {
+    DataAnalysisCell::load(&id)
+}
+
+#[tauri::command]
+async fn list_analysis_cells(
+    project_id: String,
+) -> Result<Vec<DataAnalysisCell>, String> {
+    DataAnalysisCell::list_by_project(&project_id)
+}
+
+#[tauri::command]
+async fn delete_analysis_cell(
+    id: String,
+) -> Result<(), String> {
+    if let Some(cell) = DataAnalysisCell::load(&id)? {
+        cell.delete()
+    } else {
+        Err("Analysis cell not found".to_string())
+    }
+}
+
+#[tauri::command]
+async fn update_analysis_cell_status(
+    id: String,
+    status: String,
+) -> Result<(), String> {
+    cedar::storage::update_analysis_cell_status(&id, &status)
+}
+
+#[tauri::command]
+async fn update_analysis_cell_content(
+    id: String,
+    content: String,
+) -> Result<(), String> {
+    cedar::storage::update_analysis_cell_content(&id, &content)
+}
+
+#[tauri::command]
+async fn add_rust_analysis_to_cell(
+    id: String,
+    rust_analysis: serde_json::Value,
+) -> Result<(), String> {
+    cedar::storage::add_rust_analysis_to_cell(&id, rust_analysis)
+}
+
+#[tauri::command]
+async fn add_llm_analysis_to_cell(
+    id: String,
+    llm_analysis: serde_json::Value,
+) -> Result<(), String> {
+    cedar::storage::add_llm_analysis_to_cell(&id, llm_analysis)
 }
