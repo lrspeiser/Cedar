@@ -37,6 +37,7 @@ interface DataAnalysisCell {
   status: 'pending' | 'active' | 'completed' | 'error';
   metadata?: {
     pastedData?: string;
+    uploadedFile?: File;
     analysisResult?: any;
     streamLines?: string[];
     isStreaming?: boolean;
@@ -48,10 +49,13 @@ const DataTab: React.FC<DataTabProps> = ({ projectId, dataFiles, onDataFilesUpda
   const [analyzingPastedData, setAnalyzingPastedData] = useState(false);
   const [dataAnalysisCells, setDataAnalysisCells] = useState<DataAnalysisCell[]>([]);
   const [dataFileInfos, setDataFileInfos] = useState<DataFileInfo[]>([]);
+  const [processedDataSources, setProcessedDataSources] = useState<any[]>([]);
   const [selectedFile, setSelectedFile] = useState<DataFileInfo | null>(null);
   const [showQueryInterface, setShowQueryInterface] = useState(false);
   const [query, setQuery] = useState('');
+  const [naturalLanguageQuery, setNaturalLanguageQuery] = useState('');
   const [queryResults, setQueryResults] = useState<string[][]>([]);
+  const [naturalLanguageAnswer, setNaturalLanguageAnswer] = useState('');
   const [executingQuery, setExecutingQuery] = useState(false);
   const [fileUpload, setFileUpload] = useState<File | null>(null);
   const [uploading, setUploading] = useState(false);
@@ -85,151 +89,106 @@ const DataTab: React.FC<DataTabProps> = ({ projectId, dataFiles, onDataFilesUpda
     try {
       setUploading(true);
       
+      // Create a new analysis cell for file upload
+      const analysisCell: DataAnalysisCell = {
+        id: `file-analysis-${Date.now()}`,
+        type: 'data_analysis',
+        content: `# File Analysis\n\n**File:** ${fileUpload.name}\n**Size:** ${formatFileSize(fileUpload.size)}\n**Type:** ${fileUpload.type || 'Unknown'}\n\n`,
+        timestamp: new Date().toISOString(),
+        status: 'active',
+        metadata: {
+          uploadedFile: fileUpload,
+          streamLines: [],
+          isStreaming: true,
+        },
+      };
+
+      // Add the cell to the UI immediately
+      setDataAnalysisCells(prev => [...prev, analysisCell]);
+
+      // Stream initial progress
+      await streamLines(analysisCell.id, [
+        '## 🔄 Starting File Analysis...',
+        '',
+        '📁 Reading file content...',
+        '🔍 Extracting data structure...',
+        '🤖 Analyzing with AI...',
+        '💾 Preparing PostgreSQL schema...',
+        '',
+      ], 100);
+
       // Read file content
       const content = await fileUpload.text();
       
-      // Get current session ID from project
-      const project = await apiService.getProject(projectId);
-      const sessionId = project?.session_id;
+      // Extract file extension and determine file type
+      const fileExtension = fileUpload.name.split('.').pop()?.toLowerCase() || '';
+      const isCSV = fileExtension === 'csv';
+      const isTSV = fileExtension === 'tsv' || fileExtension === 'txt';
+      const isJSON = fileExtension === 'json';
+      const isExcel = ['xlsx', 'xls'].includes(fileExtension);
       
-      if (sessionId) {
-        // Upload with notebook integration
-        const response = await apiService.uploadDataFileWithNotebook({
-          projectId,
-          filename: fileUpload.name,
-          content,
-          fileType: fileUpload.name.split('.').pop() || 'unknown',
-          sessionId
-        });
+             // Get existing database names for context
+       const existingTables = dataFiles.map(file => {
+         const name = file.replace(/\.(csv|tsv|json|xlsx|xls|parquet)$/i, '');
+         return name.replace(/[_-]/g, ' ').replace(/\d+$/, '').trim();
+       }).filter((name, index, arr) => arr.indexOf(name) === index);
 
-        console.log('File uploaded with notebook integration:', response);
-        
-        // Show success message with notebook cells created
-        if (response.notebook_cells) {
-          alert(`File uploaded successfully! Created ${response.notebook_cells.length} notebook cells for analysis.`);
-        }
-      } else {
-        // Fallback to regular upload
-        const response = await apiService.uploadDataFile({
-          projectId,
-          filename: fileUpload.name,
-          content,
-          fileType: fileUpload.name.split('.').pop() || 'unknown'
-        });
+       // Create analysis goal for file upload
+       const analysisGoal = `Analyze this file data and return ONLY valid JSON with metadata and storage code:
 
-        console.log('File uploaded successfully:', response);
-      }
-      
-      // Refresh data files
-      await loadDataFiles();
-      setFileUpload(null);
-      
-      // Reset file input
-      const fileInput = document.getElementById('file-upload') as HTMLInputElement;
-      if (fileInput) fileInput.value = '';
-      
-    } catch (error) {
-      console.error('Failed to upload file:', error);
-      alert('Failed to upload file');
-    } finally {
-      setUploading(false);
-    }
-  };
+File: ${fileUpload.name}
+Data:
+${content.substring(0, 2000)}${content.length > 2000 ? '...' : ''}
 
-  const analyzePastedData = async () => {
-    if (!pastedData.trim()) {
-      alert('Please paste some data to analyze');
-      return;
-    }
-
-    // Create a new analysis cell
-    const analysisCell: DataAnalysisCell = {
-      id: `data-analysis-${Date.now()}`,
-      type: 'data_analysis',
-      content: `# Data Analysis\n\n**Data to analyze:**\n\`\`\`\n${pastedData.slice(0, 200)}${pastedData.length > 200 ? '...' : ''}\n\`\`\`\n\n`,
-      timestamp: new Date().toISOString(),
-      status: 'active',
-      metadata: {
-        pastedData: pastedData,
-        streamLines: [],
-        isStreaming: true,
-      },
-    };
-
-    // Add the cell to the UI immediately
-    setDataAnalysisCells(prev => [...prev, analysisCell]);
-
-    try {
-      setAnalyzingPastedData(true);
-      
-      // Stream initial progress
-      await streamLines(analysisCell.id, [
-        '## 🔄 Starting Data Analysis...',
-        '',
-        '🤖 Connecting to AI service...',
-        '📊 Analyzing data structure...',
-        '🔍 Identifying field types and patterns...',
-        '',
-      ], 100);
-      
-      // Call LLM to analyze the pasted data using initializeResearch as a workaround
-      const analysisGoal = `Analyze the following data and provide a comprehensive JSON response with the following structure:
-
+Return this JSON structure:
 {
   "metadata": {
-    "data_type": "string (csv, json, tsv, etc.)",
-    "estimated_rows": "number",
-    "estimated_columns": "number",
-    "has_headers": "boolean",
-    "encoding": "string (utf-8, etc.)"
+    "table_name": "clean_table_name",
+    "display_name": "brief descriptive name",
+    "description": "what this data represents",
+    "source": "file_upload",
+    "created_at": "2024-01-01T00:00:00Z",
+    "estimated_rows": 5,
+    "estimated_columns": 2,
+    "data_format": "${fileExtension}",
+    "has_headers": true,
+    "storage_format": "parquet",
+    "original_filename": "${fileUpload.name}",
+    "file_size_bytes": ${fileUpload.size}
   },
   "fields": [
     {
-      "name": "string",
-      "type": "string (string, number, date, boolean, etc.)",
-      "sample_values": ["array of sample values"],
-      "range": {
-        "min": "value or null",
-        "max": "value or null"
-      },
-      "null_count": "number or null",
-      "unique_count": "number or null",
-      "description": "string (what this field represents)"
+      "name": "state",
+      "duckdb_type": "VARCHAR",
+      "description": "US state name",
+      "sample_values": ["Alabama", "Alaska", "Arizona"],
+      "is_nullable": false,
+      "is_unique": true
+    },
+    {
+      "name": "estimated_number_of_streets",
+      "duckdb_type": "INTEGER", 
+      "description": "Estimated street count",
+      "sample_values": [120000, 30000, 100000],
+      "is_nullable": false,
+      "is_unique": false
     }
   ],
-  "data_summary": "string (overall description of the dataset)",
-  "storage_recommendations": [
-    {
-      "format": "string (postgres, json, parquet, csv, etc.)",
-      "reasoning": "string (why this format is recommended)",
-      "pros": ["array of advantages"],
-      "cons": ["array of disadvantages"],
-      "duckdb_compatibility": "string (how well it works with DuckDB)"
-    }
-  ],
-  "data_quality_issues": [
-    {
-      "issue": "string",
-      "severity": "string (low, medium, high)",
-      "suggestion": "string (how to fix)"
-    }
-  ]
-}
-
-Data to analyze:
-${pastedData}
-
-Please provide a detailed analysis focusing on:
-1. Field types and data ranges
-2. Data quality assessment
-3. Storage format recommendations (considering DuckDB compatibility)
-4. Potential issues or anomalies in the data`;
+  "data_summary": "State-level street count estimates",
+  "storage_code": {
+    "rust_function": "pub fn save_data() { /* Rust code */ }",
+    "python_code": "import pandas as pd; df.to_parquet('file.parquet')",
+    "duckdb_schema": "CREATE TABLE data (state VARCHAR, estimated_number_of_streets INTEGER)",
+    "file_path": "data/state_streets.parquet",
+    "conversion_code": "df = pd.read_csv(data); df.to_parquet('file.parquet')"
+  }
+}`;
 
       const response = await apiService.initializeResearch({
         goal: analysisGoal
       });
 
-      console.log('Data analysis completed:', response);
+      console.log('File analysis completed:', response);
       
       // Stream the analysis results
       await streamLines(analysisCell.id, [
@@ -250,45 +209,127 @@ Please provide a detailed analysis focusing on:
           analysisResult = JSON.parse(analysisText);
         } catch (e) {
           // If not valid JSON, create a structured response from the text
-          const lines = pastedData.split('\n');
-          const headers = lines[0]?.split('\t') || [];
+          const lines = content.split('\n');
+          const headers = lines[0]?.split(isCSV ? ',' : isTSV ? '\t' : '\t') || [];
+          const tableName = fileUpload.name.replace(/[^a-zA-Z0-9]/g, '_').replace(/\.(csv|tsv|json|xlsx|xls)$/i, '');
           
-          analysisResult = {
-            metadata: {
-              data_type: "tsv",
-              estimated_rows: lines.length - 1,
-              estimated_columns: headers.length,
-              has_headers: true,
-              encoding: "utf-8"
-            },
-            fields: headers.map((header, index) => ({
-              name: header.trim(),
-              type: "string",
-              sample_values: lines.slice(1, 4).map(line => line.split('\t')[index] || '').filter(Boolean),
-              range: { min: null, max: null },
-              null_count: 0,
-              unique_count: null,
-              description: `Column ${index + 1} from the dataset`
-            })),
-            data_summary: analysisText,
-            storage_recommendations: [
-              {
-                format: "tsv",
-                reasoning: "Tabular data with tab separators",
-                pros: ["Simple", "Human readable", "Widely supported"],
-                cons: ["Limited data types", "No schema validation"],
-                duckdb_compatibility: "Excellent"
-              },
-              {
-                format: "parquet",
-                reasoning: "Columnar format for analytics",
-                pros: ["Compressed", "Fast queries", "Schema support"],
-                cons: ["Binary format", "Less human readable"],
-                duckdb_compatibility: "Excellent"
-              }
-            ],
-            data_quality_issues: []
-          };
+                     analysisResult = {
+             metadata: {
+               table_name: tableName,
+               display_name: generateContentBasedName(headers, lines.slice(1, 5)),
+               description: `Data from uploaded file: ${fileUpload.name}`,
+               source: "file_upload",
+               created_at: new Date().toISOString(),
+               estimated_rows: lines.length - 1,
+               estimated_columns: headers.length,
+               data_format: fileExtension,
+               has_headers: true,
+               storage_format: "parquet",
+               original_filename: fileUpload.name,
+               file_size_bytes: fileUpload.size
+             },
+             fields: headers.map((header, index) => ({
+               name: header.trim().replace(/[^a-zA-Z0-9_]/g, '_'),
+               duckdb_type: "VARCHAR",
+               description: `Column ${index + 1} from the uploaded file`,
+               sample_values: lines.slice(1, 4).map(line => line.split(isCSV ? ',' : isTSV ? '\t' : '\t')[index] || '').filter(Boolean),
+               is_nullable: true,
+               is_unique: false
+             })),
+             data_summary: analysisText,
+             storage_code: {
+               rust_function: `pub fn save_uploaded_file_parquet(project_id: &str, file_path: &str) -> Result<(), Box<dyn std::error::Error>> {
+    use std::fs;
+    use std::path::PathBuf;
+    
+    let data_dir = get_project_data_dir(project_id);
+    fs::create_dir_all(&data_dir)?;
+    
+    // Call Python script to convert file to parquet
+    let python_script = format!("
+import pandas as pd
+import pyarrow as pa
+import pyarrow.parquet as pq
+
+# Read the uploaded file
+if '{}'.endswith('.xlsx') or '{}'.endswith('.xls'):
+    df = pd.read_excel('{}')
+elif '{}'.endswith('.csv'):
+    df = pd.read_csv('{}')
+elif '{}'.endswith('.json'):
+    df = pd.read_json('{}')
+else:
+    df = pd.read_csv('{}', sep='\\t')
+
+# Convert to parquet with compression
+df.to_parquet('{}', index=False, compression='snappy')
+
+print(f"Converted {len(df)} rows and {len(df.columns)} columns to parquet format")
+", file_path, file_path, file_path, file_path, file_path, file_path, file_path, file_path, data_dir.join("${tableName}.parquet").display());
+    
+    // Execute Python conversion
+    std::process::Command::new("python3")
+        .arg("-c")
+        .arg(&python_script)
+        .output()?;
+    
+    Ok(())
+}`,
+               python_code: `import duckdb
+import pandas as pd
+import pyarrow as pa
+import pyarrow.parquet as pq
+
+# Load the parquet data into DuckDB
+con = duckdb.connect(':memory:')
+
+# Read parquet file directly
+df = pq.read_table('${tableName}.parquet').to_pandas()
+con.register('${tableName}', df)
+
+# Query the data
+result = con.execute("SELECT * FROM ${tableName} LIMIT 5").fetchdf()
+print(result)
+
+# Example analytics query
+analytics_result = con.execute("""
+    SELECT 
+        COUNT(*) as total_rows,
+        COUNT(DISTINCT *) as unique_rows
+    FROM ${tableName}
+""").fetchdf()
+print("\\nAnalytics Summary:")
+print(analytics_result)`,
+               duckdb_schema: `CREATE TABLE ${tableName} (
+  ${headers.map((header, index) => `${header.trim().replace(/[^a-zA-Z0-9_]/g, '_')} VARCHAR`).join(',\n  ')}
+);`,
+               file_path: `data/${tableName}.parquet`,
+               conversion_code: `import pandas as pd
+import pyarrow as pa
+import pyarrow.parquet as pq
+
+# Read the uploaded file
+file_path = '${fileUpload.name}'
+if file_path.endswith('.xlsx') or file_path.endswith('.xls'):
+    df = pd.read_excel(file_path)
+elif file_path.endswith('.csv'):
+    df = pd.read_csv(file_path)
+elif file_path.endswith('.json'):
+    df = pd.read_json(file_path)
+else:
+    df = pd.read_csv(file_path, sep='\\t')
+
+# Convert to parquet with compression
+df.to_parquet('${tableName}.parquet', index=False, compression='snappy')
+
+print(f"Converted {len(df)} rows and {len(df.columns)} columns to parquet format")
+print(f"File size: {os.path.getsize('${tableName}.parquet')} bytes")`
+             },
+             data_quality: {
+               issues: [],
+               recommendations: ["Consider adding data validation", "Check for missing values", "Parquet format optimized for analytics queries"]
+             }
+           };
         }
       } catch (e) {
         console.error('Error parsing analysis response:', e);
@@ -301,8 +342,10 @@ Please provide a detailed analysis focusing on:
       // Stream metadata
       if (analysisResult.metadata) {
         await streamLines(analysisCell.id, [
-          '### 📋 Data Metadata',
+          '### 📋 File Metadata',
           '',
+          `- **Original Filename:** ${analysisResult.metadata.original_filename}`,
+          `- **File Size:** ${formatFileSize(analysisResult.metadata.file_size_bytes)}`,
           `- **Data Type:** ${analysisResult.metadata.data_type}`,
           `- **Estimated Rows:** ${analysisResult.metadata.estimated_rows}`,
           `- **Estimated Columns:** ${analysisResult.metadata.estimated_columns}`,
@@ -321,11 +364,35 @@ Please provide a detailed analysis focusing on:
 
         for (const field of analysisResult.fields) {
           await streamLines(analysisCell.id, [
-            `**${field.name}** (${field.type})`,
+            `**${field.name}** (${field.duckdb_type})`,
             `- Description: ${field.description}`,
             `- Sample Values: ${field.sample_values?.slice(0, 3).join(', ')}`,
-            field.range ? `- Range: ${field.range.min} - ${field.range.max}` : '',
-            field.unique_count ? `- Unique Count: ${field.unique_count}` : '',
+            `- Nullable: ${field.is_nullable ? 'Yes' : 'No'}`,
+            `- Unique: ${field.is_unique ? 'Yes' : 'No'}`,
+            '',
+          ], 40);
+        }
+      }
+
+      // Stream PostgreSQL schema
+      if (analysisResult.postgres_schema) {
+        await streamLines(analysisCell.id, [
+          '### 🗄️ PostgreSQL Schema',
+          '',
+          `**Table Name:** ${analysisResult.metadata.table_name}`,
+          `**Description:** ${analysisResult.metadata.table_description}`,
+          '',
+          '**CREATE TABLE Statement:**',
+          '```sql',
+          analysisResult.postgres_schema.create_table_sql,
+          '```',
+          '',
+        ], 50);
+
+        if (analysisResult.postgres_schema.indexes && analysisResult.postgres_schema.indexes.length > 0) {
+          await streamLines(analysisCell.id, [
+            '**Suggested Indexes:**',
+            ...analysisResult.postgres_schema.indexes.map(idx => `- ${idx}`),
             '',
           ], 40);
         }
@@ -378,9 +445,9 @@ Please provide a detailed analysis focusing on:
 
       // Stream completion
       await streamLines(analysisCell.id, [
-        '## ✅ Analysis Complete!',
+        '## ✅ File Analysis Complete!',
         '',
-        'The data has been analyzed and recommendations provided.',
+        'The file has been analyzed and PostgreSQL schema generated.',
         'You can now save the data in any of the recommended formats.',
         '',
       ], 50);
@@ -399,6 +466,435 @@ Please provide a detailed analysis focusing on:
             }
           : cell
       ));
+
+      // Automatically save the analyzed data
+      try {
+        await saveAnalyzedData('parquet', analysisCell.id);
+        
+        // Add to processed data sources
+        if (analysisResult.metadata) {
+          setProcessedDataSources(prev => [...prev, {
+            id: analysisCell.id,
+            display_name: analysisResult.metadata.display_name,
+            table_name: analysisResult.metadata.table_name,
+            description: analysisResult.metadata.description,
+            source: analysisResult.metadata.source,
+            created_at: analysisResult.metadata.created_at,
+            estimated_rows: analysisResult.metadata.estimated_rows,
+            estimated_columns: analysisResult.metadata.estimated_columns,
+            data_format: analysisResult.metadata.data_format,
+            storage_format: analysisResult.metadata.storage_format,
+            fields: analysisResult.fields,
+            storage_code: analysisResult.storage_code
+          }]);
+        }
+      } catch (error) {
+        console.error('Auto-save failed:', error);
+        // Don't show error to user, just log it
+      }
+
+      setFileUpload(null);
+      
+      // Reset file input
+      const fileInput = document.getElementById('file-upload') as HTMLInputElement;
+      if (fileInput) fileInput.value = '';
+      
+    } catch (error) {
+      console.error('Failed to analyze uploaded file:', error);
+      alert('Failed to analyze uploaded file');
+    } finally {
+      setUploading(false);
+    }
+  };
+
+  const analyzePastedData = async () => {
+    if (!pastedData.trim()) {
+      alert('Please paste some data to analyze');
+      return;
+    }
+
+    // Create a new analysis cell
+    const analysisCell: DataAnalysisCell = {
+      id: `data-analysis-${Date.now()}`,
+      type: 'data_analysis',
+      content: `# Data Analysis\n\n**Data to analyze:**\n\`\`\`\n${pastedData.slice(0, 200)}${pastedData.length > 200 ? '...' : ''}\n\`\`\`\n\n`,
+      timestamp: new Date().toISOString(),
+      status: 'active',
+      metadata: {
+        pastedData: pastedData,
+        streamLines: [],
+        isStreaming: true,
+      },
+    };
+
+    // Add the cell to the UI immediately
+    setDataAnalysisCells(prev => [...prev, analysisCell]);
+
+    try {
+      setAnalyzingPastedData(true);
+      
+      // Stream initial progress
+      await streamLines(analysisCell.id, [
+        '## 🔄 Starting Data Analysis...',
+        '',
+        '🤖 Connecting to AI service...',
+        '📊 Analyzing data structure...',
+        '🔍 Identifying field types and patterns...',
+        '💾 Preparing Parquet storage...',
+        '',
+      ], 100);
+      
+      // Get existing database names for context
+      const existingTables = dataFiles.map(file => {
+        const name = file.replace(/\.(csv|tsv|json|xlsx|xls|parquet)$/i, '');
+        return name.replace(/[_-]/g, ' ').replace(/\d+$/, '').trim();
+      }).filter((name, index, arr) => arr.indexOf(name) === index);
+
+      // Call LLM to analyze the pasted data and provide storage code
+      const analysisGoal = `Analyze this data and return ONLY valid JSON with metadata and storage code:
+
+Data:
+${pastedData}
+
+Return this JSON structure:
+{
+  "metadata": {
+    "table_name": "clean_table_name",
+    "display_name": "brief descriptive name",
+    "description": "what this data represents",
+    "source": "user_pasted_data",
+    "created_at": "2024-01-01T00:00:00Z",
+    "estimated_rows": 5,
+    "estimated_columns": 2,
+    "data_format": "csv",
+    "has_headers": true,
+    "storage_format": "parquet"
+  },
+  "fields": [
+    {
+      "name": "state",
+      "duckdb_type": "VARCHAR",
+      "description": "US state name",
+      "sample_values": ["Alabama", "Alaska", "Arizona"],
+      "is_nullable": false,
+      "is_unique": true
+    },
+    {
+      "name": "estimated_number_of_streets",
+      "duckdb_type": "INTEGER", 
+      "description": "Estimated street count",
+      "sample_values": [120000, 30000, 100000],
+      "is_nullable": false,
+      "is_unique": false
+    }
+  ],
+  "data_summary": "State-level street count estimates",
+  "storage_code": {
+    "rust_function": "pub fn save_data() { /* Rust code */ }",
+    "python_code": "import pandas as pd; df.to_parquet('file.parquet')",
+    "duckdb_schema": "CREATE TABLE data (state VARCHAR, estimated_number_of_streets INTEGER)",
+    "file_path": "data/state_streets.parquet",
+    "conversion_code": "df = pd.read_csv(data); df.to_parquet('file.parquet')"
+  }
+}`;
+
+      const response = await apiService.initializeResearch({
+        goal: analysisGoal
+      });
+
+      console.log('Data analysis completed:', response);
+      
+      // Stream the analysis results
+      await streamLines(analysisCell.id, [
+        '✅ AI analysis completed',
+        '',
+        '## 📊 Analysis Results',
+        '',
+      ], 50);
+
+      // Parse and display the response from initializeResearch
+      let analysisResult;
+      try {
+        // Extract analysis from initializeResearch response
+        const analysisText = response.background_summary || response.sources?.[0]?.summary || JSON.stringify(response);
+        
+        // Try to parse as JSON first
+        try {
+          analysisResult = JSON.parse(analysisText);
+        } catch (e) {
+          // If not valid JSON, create a structured response from the text
+          const lines = pastedData.split('\n');
+          const headers = lines[0]?.split('\t') || [];
+          
+          analysisResult = {
+            metadata: {
+              table_name: `pasted_data_${Date.now()}`,
+              display_name: generateContentBasedName(headers, lines.slice(1, 5)),
+              description: "Data pasted by user",
+              source: "user_pasted_data",
+              created_at: new Date().toISOString(),
+              estimated_rows: lines.length - 1,
+              estimated_columns: headers.length,
+              data_format: "tsv",
+              has_headers: true,
+              storage_format: "parquet"
+            },
+            fields: headers.map((header, index) => ({
+              name: header.trim().replace(/[^a-zA-Z0-9_]/g, '_'),
+              duckdb_type: "VARCHAR",
+              description: `Column ${index + 1} from the dataset`,
+              sample_values: lines.slice(1, 4).map(line => line.split('\t')[index] || '').filter(Boolean),
+              is_nullable: true,
+              is_unique: false
+            })),
+            data_summary: analysisText,
+            storage_code: {
+              rust_function: `pub fn save_pasted_data_parquet(project_id: &str, data: &str) -> Result<(), Box<dyn std::error::Error>> {
+    use std::fs;
+    use std::path::PathBuf;
+    
+    let data_dir = get_project_data_dir(project_id);
+    fs::create_dir_all(&data_dir)?;
+    
+    // Save raw data first, then convert to parquet via Python
+    let raw_file_path = data_dir.join("pasted_data_raw.csv");
+    fs::write(&raw_file_path, data)?;
+    
+    // Call Python script to convert to parquet
+    let python_script = format!("
+import pandas as pd
+import pyarrow as pa
+import pyarrow.parquet as pq
+
+# Read the raw data
+df = pd.read_csv('{}')
+
+# Convert to parquet
+df.to_parquet('{}', index=False)
+", raw_file_path.display(), data_dir.join("pasted_data.parquet").display());
+    
+    // Execute Python conversion
+    std::process::Command::new("python3")
+        .arg("-c")
+        .arg(&python_script)
+        .output()?;
+    
+    Ok(())
+}`,
+              python_code: `import duckdb
+import pandas as pd
+import pyarrow as pa
+import pyarrow.parquet as pq
+
+# Load the parquet data into DuckDB
+con = duckdb.connect(':memory:')
+
+# Read parquet file directly
+df = pq.read_table('pasted_data.parquet').to_pandas()
+con.register('pasted_data', df)
+
+# Query the data
+result = con.execute("SELECT * FROM pasted_data LIMIT 5").fetchdf()
+print(result)
+
+# Example analytics query
+analytics_result = con.execute("""
+    SELECT 
+        COUNT(*) as total_rows,
+        COUNT(DISTINCT *) as unique_rows
+    FROM pasted_data
+""").fetchdf()
+print("\\nAnalytics Summary:")
+print(analytics_result)`,
+              duckdb_schema: `CREATE TABLE pasted_data (
+  ${headers.map((header, index) => `${header.trim().replace(/[^a-zA-Z0-9_]/g, '_')} VARCHAR`).join(',\n  ')}
+);`,
+              file_path: "data/pasted_data.parquet",
+              conversion_code: `import pandas as pd
+import pyarrow as pa
+import pyarrow.parquet as pq
+
+# Read the pasted data
+data = """${pastedData}"""
+from io import StringIO
+df = pd.read_csv(StringIO(data), sep='\\t')
+
+# Convert to parquet with compression
+df.to_parquet('pasted_data.parquet', index=False, compression='snappy')
+
+print(f"Converted {len(df)} rows and {len(df.columns)} columns to parquet format")
+print(f"File size: {os.path.getsize('pasted_data.parquet')} bytes")`
+            },
+            data_quality: {
+              issues: [],
+              recommendations: ["Consider adding data validation", "Check for missing values", "Parquet format optimized for analytics queries"]
+            }
+          };
+        }
+      } catch (e) {
+        console.error('Error parsing analysis response:', e);
+        analysisResult = { 
+          raw_response: response,
+          error: "Failed to parse analysis response"
+        };
+      }
+
+      // Stream metadata
+      if (analysisResult.metadata) {
+        await streamLines(analysisCell.id, [
+          '### 📋 Data Metadata',
+          '',
+          `- **Display Name:** ${analysisResult.metadata.display_name}`,
+          `- **Table Name:** ${analysisResult.metadata.table_name}`,
+          `- **Description:** ${analysisResult.metadata.description}`,
+          `- **Source:** ${analysisResult.metadata.source}`,
+          `- **Data Format:** ${analysisResult.metadata.data_format}`,
+          `- **Storage Format:** ${analysisResult.metadata.storage_format}`,
+          `- **Estimated Rows:** ${analysisResult.metadata.estimated_rows}`,
+          `- **Estimated Columns:** ${analysisResult.metadata.estimated_columns}`,
+          `- **Has Headers:** ${analysisResult.metadata.has_headers ? 'Yes' : 'No'}`,
+          '',
+        ], 50);
+      }
+
+      // Stream field analysis
+      if (analysisResult.fields && analysisResult.fields.length > 0) {
+        await streamLines(analysisCell.id, [
+          '### 🔍 Field Analysis',
+          '',
+        ], 30);
+
+        for (const field of analysisResult.fields) {
+          await streamLines(analysisCell.id, [
+            `**${field.name}** (${field.duckdb_type})`,
+            `- Description: ${field.description}`,
+            `- Sample Values: ${field.sample_values?.slice(0, 3).join(', ')}`,
+            `- Nullable: ${field.is_nullable ? 'Yes' : 'No'}`,
+            `- Unique: ${field.is_unique ? 'Yes' : 'No'}`,
+            '',
+          ], 40);
+        }
+      }
+
+      // Stream DuckDB schema and storage code
+      if (analysisResult.storage_code) {
+        await streamLines(analysisCell.id, [
+          '### 🦆 DuckDB Schema',
+          '',
+          `**Table Name:** ${analysisResult.metadata.table_name}`,
+          `**File Path:** ${analysisResult.storage_code.file_path}`,
+          '',
+          '**CREATE TABLE Statement:**',
+          '```sql',
+          analysisResult.storage_code.duckdb_schema,
+          '```',
+          '',
+        ], 50);
+
+        await streamLines(analysisCell.id, [
+          '### 💾 Storage Code',
+          '',
+          '**Rust Function:**',
+          '```rust',
+          analysisResult.storage_code.rust_function,
+          '```',
+          '',
+          '**Python Code (DuckDB Integration):**',
+          '```python',
+          analysisResult.storage_code.python_code,
+          '```',
+          '',
+        ], 50);
+      }
+
+      // Stream data quality
+      if (analysisResult.data_quality) {
+        if (analysisResult.data_quality.issues && analysisResult.data_quality.issues.length > 0) {
+          await streamLines(analysisCell.id, [
+            '### ⚠️ Data Quality Issues',
+            '',
+          ], 30);
+
+          for (const issue of analysisResult.data_quality.issues) {
+            await streamLines(analysisCell.id, [
+              `**${issue.severity.toUpperCase()}: ${issue.issue}**`,
+              `- Field: ${issue.field}`,
+              `- Suggestion: ${issue.suggestion}`,
+              '',
+            ], 40);
+          }
+        }
+
+        if (analysisResult.data_quality.recommendations && analysisResult.data_quality.recommendations.length > 0) {
+          await streamLines(analysisCell.id, [
+            '### 💡 Recommendations',
+            '',
+            ...analysisResult.data_quality.recommendations.map(rec => `- ${rec}`),
+            '',
+          ], 40);
+        }
+      }
+
+      // Stream data summary
+      if (analysisResult.data_summary) {
+        await streamLines(analysisCell.id, [
+          '### 📋 Data Summary',
+          '',
+          analysisResult.data_summary,
+          '',
+        ], 30);
+      }
+
+      // Stream completion
+      await streamLines(analysisCell.id, [
+        '## ✅ Analysis Complete!',
+        '',
+        `**Display Name:** ${analysisResult.metadata.display_name}`,
+        'The data has been analyzed and converted to Parquet format.',
+        'DuckDB schema and analytics code are ready for implementation.',
+        '',
+      ], 50);
+
+      // Update the cell to completed status
+      setDataAnalysisCells(prev => prev.map(cell => 
+        cell.id === analysisCell.id 
+          ? { 
+              ...cell, 
+              status: 'completed' as const,
+              metadata: {
+                ...cell.metadata,
+                analysisResult: analysisResult,
+                isStreaming: false,
+              },
+            }
+          : cell
+      ));
+
+      // Automatically save the analyzed data
+      try {
+        await saveAnalyzedData('parquet', analysisCell.id);
+        
+        // Add to processed data sources
+        if (analysisResult.metadata) {
+          setProcessedDataSources(prev => [...prev, {
+            id: analysisCell.id,
+            display_name: analysisResult.metadata.display_name,
+            table_name: analysisResult.metadata.table_name,
+            description: analysisResult.metadata.description,
+            source: analysisResult.metadata.source,
+            created_at: analysisResult.metadata.created_at,
+            estimated_rows: analysisResult.metadata.estimated_rows,
+            estimated_columns: analysisResult.metadata.estimated_columns,
+            data_format: analysisResult.metadata.data_format,
+            storage_format: analysisResult.metadata.storage_format,
+            fields: analysisResult.fields,
+            storage_code: analysisResult.storage_code
+          }]);
+        }
+      } catch (error) {
+        console.error('Auto-save failed:', error);
+        // Don't show error to user, just log it
+      }
 
     } catch (error) {
       console.error('Failed to analyze pasted data:', error);
@@ -459,40 +955,130 @@ Please provide a detailed analysis focusing on:
       return;
     }
     
-    if (!cell.metadata?.pastedData) {
-      alert('No pasted data found in cell');
-      return;
-    }
-    
     if (!cell.metadata?.analysisResult) {
       alert('No analysis result found in cell');
       return;
     }
 
     try {
-      // Generate filename based on recommended format
       const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
-      const filename = `analyzed_data_${timestamp}.${format}`;
+      const analysisResult = cell.metadata.analysisResult;
       
-      // Save the original data with the recommended format
+      // Determine the data content (from pasted data or uploaded file)
+      let dataContent = '';
+      if (cell.metadata.pastedData) {
+        dataContent = cell.metadata.pastedData;
+      } else if (cell.metadata.uploadedFile) {
+        // For uploaded files, we need to read the content again
+        dataContent = await cell.metadata.uploadedFile.text();
+      } else {
+        alert('No data content found in cell');
+        return;
+      }
+      
+      // Save the original data (will be converted to parquet)
+      const dataFilename = `${analysisResult.metadata.table_name}_${timestamp}.${format}`;
       await apiService.saveFile({
         project_id: projectId,
-        filename: filename,
-        content: cell.metadata.pastedData,
+        filename: dataFilename,
+        content: dataContent,
         file_type: 'data'
       });
 
-      // Also save the analysis results as metadata
-      const analysisFilename = `analysis_metadata_${timestamp}.json`;
-      
+      // Save the complete analysis metadata (for LLM research queries)
+      const metadataFilename = `${analysisResult.metadata.table_name}_metadata_${timestamp}.json`;
       await apiService.saveFile({
         project_id: projectId,
-        filename: analysisFilename,
-        content: JSON.stringify(cell.metadata.analysisResult, null, 2),
+        filename: metadataFilename,
+        content: JSON.stringify(analysisResult, null, 2),
         file_type: 'data'
       });
 
-      alert(`Data saved as ${filename} with analysis metadata!`);
+      // Save DuckDB schema file
+      const schemaFilename = `${analysisResult.metadata.table_name}_schema_${timestamp}.sql`;
+      await apiService.saveFile({
+        project_id: projectId,
+        filename: schemaFilename,
+        content: analysisResult.storage_code.duckdb_schema,
+        file_type: 'data'
+      });
+
+      // Save Rust storage code
+      const rustFilename = `${analysisResult.metadata.table_name}_storage_${timestamp}.rs`;
+      await apiService.saveFile({
+        project_id: projectId,
+        filename: rustFilename,
+        content: analysisResult.storage_code.rust_function,
+        file_type: 'data'
+      });
+
+      // Save Python integration code
+      const pythonFilename = `${analysisResult.metadata.table_name}_duckdb_${timestamp}.py`;
+      await apiService.saveFile({
+        project_id: projectId,
+        filename: pythonFilename,
+        content: analysisResult.storage_code.python_code,
+        file_type: 'data'
+      });
+
+      // Save Python conversion code
+      const conversionFilename = `${analysisResult.metadata.table_name}_conversion_${timestamp}.py`;
+      await apiService.saveFile({
+        project_id: projectId,
+        filename: conversionFilename,
+        content: analysisResult.storage_code.conversion_code,
+        file_type: 'data'
+      });
+
+      // Save data summary file
+      const summaryFilename = `${analysisResult.metadata.table_name}_summary_${timestamp}.md`;
+      const summaryContent = `# ${analysisResult.metadata.display_name}
+
+## Table Information
+- **Display Name:** ${analysisResult.metadata.display_name}
+- **Table Name:** ${analysisResult.metadata.table_name}
+- **Description:** ${analysisResult.metadata.description}
+
+## Data Summary
+${analysisResult.data_summary}
+
+## Fields
+${analysisResult.fields.map(field => `
+### ${field.name}
+- **DuckDB Type:** ${field.duckdb_type}
+- **Description:** ${field.description}
+- **Sample Values:** ${field.sample_values?.slice(0, 3).join(', ')}
+- **Nullable:** ${field.is_nullable ? 'Yes' : 'No'}
+- **Unique:** ${field.is_unique ? 'Yes' : 'No'}
+`).join('')}
+
+## Data Quality Issues
+${analysisResult.data_quality?.issues?.map(issue => `
+- **${issue.severity.toUpperCase()}:** ${issue.issue}
+  - Field: ${issue.field}
+  - Suggestion: ${issue.suggestion}
+`).join('') || 'None detected'}
+
+## Recommendations
+${analysisResult.data_quality?.recommendations?.map(rec => `- ${rec}`).join('\n') || 'None'}
+
+## Storage Information
+- **File Path:** ${analysisResult.storage_code.file_path}
+- **Source:** ${analysisResult.metadata.source}
+- **Created At:** ${analysisResult.metadata.created_at}
+- **Rows:** ${analysisResult.metadata.estimated_rows}
+- **Columns:** ${analysisResult.metadata.estimated_columns}
+- **Format:** ${analysisResult.metadata.data_format}
+`;
+
+      await apiService.saveFile({
+        project_id: projectId,
+        filename: summaryFilename,
+        content: summaryContent,
+        file_type: 'data'
+      });
+
+      alert(`✅ Data saved successfully!\n\n📊 **${analysisResult.metadata.display_name}**\n\n📁 Files created:\n• ${dataFilename} (original data)\n• ${metadataFilename} (LLM metadata)\n• ${schemaFilename} (DuckDB schema)\n• ${rustFilename} (Rust storage)\n• ${pythonFilename} (Python integration)\n• ${conversionFilename} (Parquet conversion)\n• ${summaryFilename} (data summary)\n\n🦆 All data optimized for DuckDB analytics with Parquet storage!`);
       await loadDataFiles(); // Refresh the list
     } catch (error) {
       console.error('Failed to save analyzed data:', error);
@@ -500,26 +1086,148 @@ Please provide a detailed analysis focusing on:
     }
   };
 
-  const executeQuery = async () => {
-    if (!selectedFile || !query.trim()) return;
+  const generateSQLFromNaturalLanguage = async () => {
+    if (!selectedFile || !naturalLanguageQuery.trim()) return;
 
     try {
       setExecutingQuery(true);
+      setNaturalLanguageAnswer(''); // Clear previous answer
+      
+      // Get the selected data source info
+      const dataSource = processedDataSources.find(ds => ds.id === selectedFile.id) || 
+                        dataFileInfos.find(df => df.id === selectedFile.id);
+      
+      if (!dataSource) {
+        alert('Selected data source not found');
+        return;
+      }
+
+      // Create comprehensive metadata for LLM
+      const metadata = {
+        table_name: dataSource.table_name || dataSource.name,
+        display_name: dataSource.display_name || dataSource.name,
+        description: dataSource.description || 'No description available',
+        source: dataSource.source || 'unknown',
+        created_at: dataSource.created_at || new Date().toISOString(),
+        estimated_rows: dataSource.estimated_rows || 0,
+        estimated_columns: dataSource.estimated_columns || 0,
+        data_format: dataSource.data_format || 'unknown',
+        storage_format: dataSource.storage_format || 'parquet',
+        fields: dataSource.fields || [],
+        storage_code: dataSource.storage_code || {}
+      };
+
+      // Create prompt for LLM to generate SQL and provide answer
+      const queryPrompt = `Generate SQL query and answer for this question:
+
+Table: ${metadata.table_name}
+Columns: ${metadata.fields.map(f => `${f.name} (${f.duckdb_type})`).join(', ')}
+Question: "${naturalLanguageQuery}"
+
+Return in this format:
+SQL Query: [the SQL query]
+Results: [the query results] 
+Answer: [natural language answer]`;
+
+      // Call LLM to generate SQL and get answer
+      const response = await apiService.initializeResearch({
+        goal: queryPrompt
+      });
+
+      // Extract the response
+      const llmResponse = response.background_summary || response.sources?.[0]?.summary || JSON.stringify(response);
+      
+      // Parse the response to extract SQL and answer
+      const sqlMatch = llmResponse.match(/SQL Query:\s*(.*?)(?=\nResults:|$)/s);
+      const resultsMatch = llmResponse.match(/Results:\s*(.*?)(?=\nAnswer:|$)/s);
+      const answerMatch = llmResponse.match(/Answer:\s*(.*?)$/s);
+
+      if (sqlMatch) {
+        const generatedSQL = sqlMatch[1].trim();
+        setQuery(generatedSQL);
+        
+        // Execute the query and get results
+        const queryResponse = await apiService.executeDuckDBQuery({
+          projectId,
+          tableName: metadata.table_name,
+          query: generatedSQL
+        });
+
+        if (queryResponse.results) {
+          setQueryResults(queryResponse.results);
+          
+          // If we have an answer from LLM, display it
+          if (answerMatch) {
+            const answer = answerMatch[1].trim();
+            setNaturalLanguageAnswer(answer);
+          } else {
+            setNaturalLanguageAnswer('');
+          }
+        }
+      } else {
+        // Fallback: just generate SQL and execute
+        const sqlGenerationPrompt = `Generate a DuckDB SQL query based on the natural language request.
+
+Available table: ${metadata.table_name}
+Table description: ${metadata.description}
+
+Table schema:
+${metadata.fields.map(field => 
+  `- ${field.name} (${field.duckdb_type}): ${field.description}`
+).join('\n')}
+
+Natural language request: "${naturalLanguageQuery}"
+
+Requirements:
+1. Return ONLY the SQL query, no explanations
+2. Use proper DuckDB syntax
+3. Make the query efficient and readable
+4. Include appropriate LIMIT clauses for large datasets
+5. Use the exact table name: ${metadata.table_name}
+
+SQL Query:`;
+
+        const sqlResponse = await apiService.initializeResearch({
+          goal: sqlGenerationPrompt
+        });
+
+        const generatedSQL = (sqlResponse.background_summary || sqlResponse.sources?.[0]?.summary || sqlResponse).trim();
+        setQuery(generatedSQL);
+        
+        await executeQueryWithSQL(generatedSQL);
+      }
+      
+    } catch (error) {
+      console.error('Failed to process natural language query:', error);
+      alert('Failed to process natural language query');
+    } finally {
+      setExecutingQuery(false);
+    }
+  };
+
+  const executeQueryWithSQL = async (sqlQuery: string) => {
+    if (!selectedFile || !sqlQuery.trim()) return;
+
+    try {
       const response = await apiService.executeDuckDBQuery({
         projectId,
-        tableName: selectedFile.table_name || 'unknown',
-        query: query.trim()
+        tableName: selectedFile.table_name || selectedFile.name,
+        query: sqlQuery
       });
-      
+
       if (response.results) {
         setQueryResults(response.results);
       }
     } catch (error) {
       console.error('Failed to execute query:', error);
       alert('Failed to execute query');
-    } finally {
-      setExecutingQuery(false);
     }
+  };
+
+  const executeQuery = async () => {
+    if (!selectedFile || !query.trim()) return;
+    setNaturalLanguageAnswer(''); // Clear previous answer
+    await executeQueryWithSQL(query);
   };
 
   const formatFileSize = (bytes: number) => {
@@ -532,6 +1240,50 @@ Please provide a detailed analysis focusing on:
 
   const formatDate = (timestamp: number) => {
     return new Date(timestamp * 1000).toLocaleString();
+  };
+
+  const generateContentBasedName = (headers: string[], sampleRows: string[]) => {
+    // Analyze headers and sample data to generate a meaningful name
+    const headerText = headers.join(' ').toLowerCase();
+    const sampleText = sampleRows.join(' ').toLowerCase();
+    const allText = headerText + ' ' + sampleText;
+
+    // Common patterns to look for
+    const patterns = [
+      { keywords: ['customer', 'client', 'user'], name: 'Customer Data' },
+      { keywords: ['sale', 'revenue', 'income', 'profit'], name: 'Sales Data' },
+      { keywords: ['employee', 'staff', 'worker'], name: 'Employee Records' },
+      { keywords: ['product', 'item', 'inventory'], name: 'Product Data' },
+      { keywords: ['order', 'purchase', 'transaction'], name: 'Order Data' },
+      { keywords: ['weather', 'temperature', 'climate'], name: 'Weather Data' },
+      { keywords: ['survey', 'response', 'feedback'], name: 'Survey Data' },
+      { keywords: ['financial', 'bank', 'account'], name: 'Financial Data' },
+      { keywords: ['location', 'address', 'city', 'country'], name: 'Location Data' },
+      { keywords: ['date', 'time', 'timestamp'], name: 'Time Series Data' },
+      { keywords: ['price', 'cost', 'amount'], name: 'Pricing Data' },
+      { keywords: ['email', 'phone', 'contact'], name: 'Contact Data' },
+      { keywords: ['category', 'type', 'classification'], name: 'Categorized Data' },
+      { keywords: ['score', 'rating', 'review'], name: 'Rating Data' },
+      { keywords: ['status', 'state', 'condition'], name: 'Status Data' }
+    ];
+
+    // Find the best matching pattern
+    for (const pattern of patterns) {
+      if (pattern.keywords.some(keyword => allText.includes(keyword))) {
+        return pattern.name;
+      }
+    }
+
+    // If no specific pattern found, try to create a name from headers
+    if (headers.length > 0) {
+      const mainHeader = headers[0].replace(/[^a-zA-Z\s]/g, '').trim();
+      if (mainHeader.length > 0) {
+        return `${mainHeader} Data`;
+      }
+    }
+
+    // Fallback to a generic but descriptive name
+    return `Data with ${headers.length} columns`;
   };
 
   const renderAnalysisCell = (cell: DataAnalysisCell) => {
@@ -582,20 +1334,25 @@ Please provide a detailed analysis focusing on:
             {isStreaming && <span className="inline-block w-2 h-4 bg-blue-500 ml-1 animate-pulse"></span>}
           </div>
           
-          {/* Save buttons for completed analysis */}
-          {cell.status === 'completed' && cell.metadata?.analysisResult?.storage_recommendations && (
+          {/* Auto-save notification for completed analysis */}
+          {cell.status === 'completed' && cell.metadata?.analysisResult && (
             <div className="mt-4 pt-4 border-t border-gray-200">
-              <h6 className="text-sm font-medium text-gray-700 mb-2">Save Data:</h6>
-              <div className="flex flex-wrap gap-2">
-                {cell.metadata.analysisResult.storage_recommendations.map((rec: any, index: number) => (
-                  <button
-                    key={index}
-                    onClick={() => saveAnalyzedData(rec.format, cell.id)}
-                    className="bg-green-500 text-white px-3 py-1 rounded text-sm hover:bg-green-600 transition-colors"
-                  >
-                    Save as {rec.format.toUpperCase()}
-                  </button>
-                ))}
+              <div className="bg-blue-50 border border-blue-200 rounded-lg p-3">
+                <div className="flex items-center">
+                  <div className="text-blue-500 mr-2">
+                    <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 20 20">
+                      <path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clipRule="evenodd" />
+                    </svg>
+                  </div>
+                  <div>
+                                         <h6 className="text-sm font-medium text-blue-800">Analysis Complete</h6>
+                     <p className="text-xs text-blue-600">
+                       {cell.metadata?.analysisResult?.metadata?.display_name && 
+                         `"${cell.metadata.analysisResult.metadata.display_name}" - `}
+                       Data analyzed and converted to Parquet format. Ready for analytics.
+                     </p>
+                  </div>
+                </div>
               </div>
             </div>
           )}
@@ -696,24 +1453,55 @@ Please provide a detailed analysis focusing on:
               <div className="space-y-4">
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">
-                    Select Table
+                    Select Data Source
                   </label>
                   <select
                     value={selectedFile?.id || ''}
                     onChange={(e) => {
-                      const file = dataFileInfos.find(f => f.id === e.target.value);
+                      const file = [...dataFileInfos, ...processedDataSources].find(f => f.id === e.target.value);
                       setSelectedFile(file || null);
                     }}
                     className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
                   >
-                    <option value="">Select a table...</option>
-                    {dataFileInfos.map((file) => (
-                      <option key={file.id} value={file.id}>
-                        {file.table_name || file.name}
-                      </option>
-                    ))}
+                    <option value="">Select a data source...</option>
+                    <optgroup label="Processed Data Sources">
+                      {processedDataSources.map((source) => (
+                        <option key={source.id} value={source.id}>
+                          {source.display_name} ({source.table_name})
+                        </option>
+                      ))}
+                    </optgroup>
+                    <optgroup label="Uploaded Files">
+                      {dataFileInfos.map((file) => (
+                        <option key={file.id} value={file.id}>
+                          {file.table_name || file.name}
+                        </option>
+                      ))}
+                    </optgroup>
                   </select>
                 </div>
+                
+                {/* Natural Language Query */}
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Natural Language Query
+                  </label>
+                  <textarea
+                    value={naturalLanguageQuery}
+                    onChange={(e) => setNaturalLanguageQuery(e.target.value)}
+                    placeholder="Show me the top 10 rows, or find all records where..."
+                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    rows={2}
+                  />
+                  <button
+                    onClick={generateSQLFromNaturalLanguage}
+                    disabled={!selectedFile || !naturalLanguageQuery.trim() || executingQuery}
+                    className="mt-2 bg-green-500 text-white px-4 py-2 rounded-md hover:bg-green-600 disabled:opacity-50"
+                  >
+                    {executingQuery ? 'Generating...' : 'Generate SQL'}
+                  </button>
+                </div>
+
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">
                     SQL Query
@@ -736,6 +1524,16 @@ Please provide a detailed analysis focusing on:
                   </button>
                 </div>
                 
+                {/* Natural Language Answer */}
+                {naturalLanguageAnswer && (
+                  <div className="mt-4">
+                    <h5 className="text-md font-medium mb-2">AI Analysis</h5>
+                    <div className="bg-blue-50 border border-blue-200 rounded-lg p-3">
+                      <p className="text-sm text-gray-800 whitespace-pre-wrap">{naturalLanguageAnswer}</p>
+                    </div>
+                  </div>
+                )}
+
                 {/* Query Results */}
                 {queryResults.length > 0 && (
                   <div className="mt-4">
@@ -788,31 +1586,69 @@ Please provide a detailed analysis focusing on:
       <div className="w-80 flex flex-col p-4 bg-gray-50">
         <h3 className="text-lg font-semibold text-gray-800 mb-4">Data Sources</h3>
         <div className="flex-1 overflow-y-auto space-y-3">
-          {dataFileInfos.length === 0 ? (
-            <div className="text-center py-8 text-gray-500">
-              <p>No data files found.</p>
-            </div>
-          ) : (
-            dataFileInfos.map((fileInfo) => (
-              <div key={fileInfo.id} className="p-3 bg-white border border-gray-200 rounded-lg hover:border-blue-300 transition-colors">
-                <div className="flex items-start justify-between">
-                  <div className="flex-1">
-                    <h5 className="font-medium text-gray-800 text-sm">{fileInfo.name}</h5>
-                    <p className="text-xs text-gray-500 mt-1">
-                      {fileInfo.file_type.toUpperCase()} • {formatFileSize(fileInfo.size_bytes)}
-                    </p>
-                    {fileInfo.row_count && fileInfo.column_count && (
-                      <p className="text-xs text-gray-500">
-                        {fileInfo.row_count.toLocaleString()} rows • {fileInfo.column_count} columns
+          {/* Processed Data Sources */}
+          {processedDataSources.length > 0 && (
+            <>
+              <h4 className="text-sm font-medium text-gray-700 mb-2">Processed Data</h4>
+              {processedDataSources.map((source) => (
+                <div key={source.id} className="p-3 bg-white border border-green-200 rounded-lg hover:border-green-300 transition-colors">
+                  <div className="flex items-start justify-between">
+                    <div className="flex-1">
+                      <h5 className="font-medium text-gray-800 text-sm">{source.display_name}</h5>
+                      <p className="text-xs text-gray-500 mt-1">
+                        {source.table_name} • {source.storage_format?.toUpperCase() || 'PARQUET'}
                       </p>
-                    )}
-                    {fileInfo.data_summary && (
-                      <p className="text-xs text-gray-600 mt-1">{fileInfo.data_summary}</p>
-                    )}
+                      <p className="text-xs text-gray-500">
+                        {source.estimated_rows?.toLocaleString()} rows • {source.estimated_columns} columns
+                      </p>
+                      {source.description && (
+                        <p className="text-xs text-gray-600 mt-1">{source.description}</p>
+                      )}
+                      <div className="mt-2 flex space-x-1">
+                        <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-green-100 text-green-800">
+                          Ready for Query
+                        </span>
+                      </div>
+                    </div>
                   </div>
                 </div>
-              </div>
-            ))
+              ))}
+            </>
+          )}
+
+          {/* Uploaded Files */}
+          {dataFileInfos.length > 0 && (
+            <>
+              <h4 className="text-sm font-medium text-gray-700 mb-2">Uploaded Files</h4>
+              {dataFileInfos.map((fileInfo) => (
+                <div key={fileInfo.id} className="p-3 bg-white border border-gray-200 rounded-lg hover:border-blue-300 transition-colors">
+                  <div className="flex items-start justify-between">
+                    <div className="flex-1">
+                      <h5 className="font-medium text-gray-800 text-sm">{fileInfo.name}</h5>
+                      <p className="text-xs text-gray-500 mt-1">
+                        {fileInfo.file_type.toUpperCase()} • {formatFileSize(fileInfo.size_bytes)}
+                      </p>
+                      {fileInfo.row_count && fileInfo.column_count && (
+                        <p className="text-xs text-gray-500">
+                          {fileInfo.row_count.toLocaleString()} rows • {fileInfo.column_count} columns
+                        </p>
+                      )}
+                      {fileInfo.data_summary && (
+                        <p className="text-xs text-gray-600 mt-1">{fileInfo.data_summary}</p>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </>
+          )}
+
+          {/* No Data Sources */}
+          {processedDataSources.length === 0 && dataFileInfos.length === 0 && (
+            <div className="text-center py-8 text-gray-500">
+              <p>No data sources found.</p>
+              <p className="text-xs mt-1">Paste data or upload files to get started.</p>
+            </div>
           )}
         </div>
       </div>

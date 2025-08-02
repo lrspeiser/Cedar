@@ -4,7 +4,8 @@
 #[cfg(test)]
 mod tests;
 
-use tauri::State;
+#[macro_use]
+use tauri::{State, command};
 use serde::{Deserialize, Serialize};
 use serde_json::Value as JsonValue;
 use std::sync::Mutex;
