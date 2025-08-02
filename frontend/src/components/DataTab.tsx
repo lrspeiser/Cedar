@@ -57,6 +57,12 @@ const DataTab: React.FC<DataTabProps> = ({ projectId, dataFiles: _dataFiles, onD
   // const [selectedFile, setSelectedFile] = useState<DataFileInfo | null>(null);
   const [fileUpload, setFileUpload] = useState<File | null>(null);
   const [uploading, setUploading] = useState(false);
+  
+  // New state for collapsible sections
+  const [showUploadSection, setShowUploadSection] = useState(false);
+  const [showPasteSection, setShowPasteSection] = useState(false);
+  const [showGenerateSection, setShowGenerateSection] = useState(false);
+  const [selectedFileId, setSelectedFileId] = useState<string | null>(null);
 
   // Load data file information and analysis cells on component mount
   useEffect(() => {
@@ -361,7 +367,7 @@ Return this JSON structure:
 
       const response = await apiService.initializeResearch({
         goal: analysisGoal
-      });
+      }) as any;
 
       console.log('File analysis completed:', response);
       
@@ -725,6 +731,20 @@ print(df.info())`
         '',
       ], 50);
 
+      // Store Rust analysis in the cell if available
+      if (rustAnalysis) {
+        await apiService.addRustAnalysisToCell({
+          id: analysisCell.id,
+          rustAnalysis: rustAnalysis
+        });
+      }
+
+      // Store LLM analysis in the cell
+      await apiService.addLlmAnalysisToCell({
+        id: analysisCell.id,
+        llmAnalysis: response
+      });
+
       // Update the cell to completed status
       setDataAnalysisCells(prev => prev.map(cell => 
         cell.id === analysisCell.id 
@@ -758,7 +778,15 @@ print(df.info())`
             data_format: analysisResult.metadata.data_format,
             storage_format: analysisResult.metadata.storage_format,
             fields: analysisResult.fields,
-            storage_code: analysisResult.storage_code
+            storage_code: analysisResult.storage_code,
+            // Add sample data and columns for metadata display
+            columns: analysisResult.fields?.map((field: any) => ({
+              name: field.name,
+              data_type: field.duckdb_type,
+              nullable: field.is_nullable,
+              sample_values: field.sample_values || []
+            })) || [],
+            sample_data: fileData?.rows?.slice(0, 5) || []
           };
           setProcessedDataSources(prev => {
             const updated = [...prev, newSource];
@@ -830,6 +858,9 @@ File analysis completed successfully. Data has been processed and is ready for q
       // Reset file input
       const fileInput = document.getElementById('file-upload') as HTMLInputElement;
       if (fileInput) fileInput.value = '';
+      
+      // Collapse upload section after successful upload
+      setShowUploadSection(false);
       
     } catch (error) {
       console.error('Failed to analyze uploaded file:', error);
@@ -930,7 +961,7 @@ Return this JSON structure:
 
       const response = await apiService.initializeResearch({
         goal: analysisGoal
-      });
+      }) as any;
 
       console.log('Data analysis completed:', response);
       
@@ -1166,6 +1197,12 @@ print(f"File size: {os.path.getsize('pasted_data.parquet')} bytes")`
         '',
       ], 50);
 
+      // Store LLM analysis in the cell
+      await apiService.addLlmAnalysisToCell({
+        id: analysisCell.id,
+        llmAnalysis: response
+      });
+
       // Update the cell to completed status
       setDataAnalysisCells(prev => prev.map(cell => 
         cell.id === analysisCell.id 
@@ -1199,7 +1236,15 @@ print(f"File size: {os.path.getsize('pasted_data.parquet')} bytes")`
             data_format: analysisResult.metadata.data_format,
             storage_format: analysisResult.metadata.storage_format,
             fields: analysisResult.fields,
-            storage_code: analysisResult.storage_code
+            storage_code: analysisResult.storage_code,
+            // Add sample data and columns for metadata display
+            columns: analysisResult.fields?.map((field: any) => ({
+              name: field.name,
+              data_type: field.duckdb_type,
+              nullable: field.is_nullable,
+              sample_values: field.sample_values || []
+            })) || [],
+            sample_data: pastedData.split('\n').slice(0, 5).map(line => line.split(',').map(cell => cell.trim()))
           };
           setProcessedDataSources(prev => {
             const updated = [...prev, newSource];
@@ -1212,35 +1257,37 @@ print(f"File size: {os.path.getsize('pasted_data.parquet')} bytes")`
         // Don't show error to user, just log it
       }
 
-    } catch (error) {
-      console.error('Failed to analyze pasted data:', error);
-      
-      // Stream error
-      await streamLines(analysisCell.id, [
-        '',
-        '## ❌ Error During Analysis',
-        '',
-        `**Error**: ${error}`,
-        '',
-        'Please check your API key and try again.',
-      ], 100);
-      
-      // Update the cell to error status
-      setDataAnalysisCells(prev => prev.map(cell => 
-        cell.id === analysisCell.id 
-          ? { 
-              ...cell, 
-              status: 'error' as const,
-              metadata: {
-                ...cell.metadata,
-                isStreaming: false,
-              },
-            }
-          : cell
-      ));
-    } finally {
-      setAnalyzingPastedData(false);
-    }
+          } catch (error) {
+        console.error('Failed to analyze pasted data:', error);
+        
+        // Stream error
+        await streamLines(analysisCell.id, [
+          '',
+          '## ❌ Error During Analysis',
+          '',
+          `**Error**: ${error}`,
+          '',
+          'Please check your API key and try again.',
+        ], 100);
+        
+        // Update the cell to error status
+        setDataAnalysisCells(prev => prev.map(cell => 
+          cell.id === analysisCell.id 
+            ? { 
+                ...cell, 
+                status: 'error' as const,
+                metadata: {
+                  ...cell.metadata,
+                  isStreaming: false,
+                },
+              }
+            : cell
+        ));
+      } finally {
+        setAnalyzingPastedData(false);
+        // Collapse paste section after analysis (success or error)
+        setShowPasteSection(false);
+      }
   };
 
   const streamLines = async (cellId: string, lines: string[], delayMs: number = 100) => {
@@ -1410,6 +1457,28 @@ ${analysisResult.data_quality?.recommendations?.map(rec => `- ${rec}`).join('\n'
     const sizes = ['Bytes', 'KB', 'MB', 'GB'];
     const i = Math.floor(Math.log(bytes) / Math.log(k));
     return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+  };
+
+  const getSelectedFileMetadata = () => {
+    // First check processed data sources
+    const processedFile = processedDataSources.find(source => source.id === selectedFileId);
+    if (processedFile) {
+      return {
+        type: 'processed',
+        data: processedFile
+      };
+    }
+    
+    // Then check uploaded files
+    const uploadedFile = dataFileInfos.find(file => file.id === selectedFileId);
+    if (uploadedFile) {
+      return {
+        type: 'uploaded',
+        data: uploadedFile
+      };
+    }
+    
+    return null;
   };
 
   // const formatDate = (timestamp: number) => {
@@ -1759,7 +1828,7 @@ ${analysisResult.data_quality?.recommendations?.map(rec => `- ${rec}`).join('\n'
 
   return (
     <div className="h-full flex">
-      {/* Left Panel - Data Analysis */}
+      {/* Left Panel - Analysis Results */}
       <div className="flex-1 flex flex-col p-4 border-r border-gray-200">
         <div className="flex-1 overflow-y-auto space-y-6">
           {/* Header */}
@@ -1767,81 +1836,11 @@ ${analysisResult.data_quality?.recommendations?.map(rec => `- ${rec}`).join('\n'
             <h3 className="text-xl font-semibold text-gray-800">Data Analysis</h3>
           </div>
 
-          {/* File Upload Section */}
-          <div className="p-4 bg-gray-50 rounded-lg">
-            <h4 className="text-lg font-medium mb-4">Upload Data File</h4>
-            <div className="space-y-4">
-              <div>
-                <input
-                  id="file-upload"
-                  type="file"
-                  accept=".csv,.json,.parquet,.xlsx,.xls,.tsv"
-                  onChange={handleFileUpload}
-                  className="block w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-cedar-50 file:text-cedar-700 hover:file:bg-cedar-100"
-                />
-              </div>
-              {fileUpload && (
-                <div className="flex items-center space-x-2">
-                  <span className="text-sm text-gray-600">
-                    Selected: {fileUpload.name} ({formatFileSize(fileUpload.size)})
-                  </span>
-                  <button
-                    onClick={uploadFile}
-                    disabled={uploading}
-                    className="bg-green-500 text-white px-3 py-1 rounded text-sm hover:bg-green-600 disabled:opacity-50"
-                  >
-                    {uploading ? 'Uploading...' : 'Upload'}
-                  </button>
-                </div>
-              )}
-            </div>
-          </div>
-
-          {/* Data Analysis Section */}
-          <div className="p-4 bg-blue-50 rounded-lg">
-            <h4 className="text-lg font-medium mb-4">Analyze Pasted Data</h4>
-            <div className="space-y-4">
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Paste Your Data
-                </label>
-                <textarea
-                  value={pastedData}
-                  onChange={(e) => setPastedData(e.target.value)}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 font-mono text-sm"
-                  placeholder="Paste CSV, JSON, TSV, or any structured data here..."
-                  rows={6}
-                />
-              </div>
-              <div className="flex space-x-2">
-                <button
-                  onClick={analyzePastedData}
-                  disabled={!pastedData.trim() || analyzingPastedData}
-                  className="bg-blue-500 text-white px-4 py-2 rounded-md hover:bg-blue-600 disabled:opacity-50"
-                >
-                  {analyzingPastedData ? 'Analyzing...' : 'Analyze with AI'}
-                </button>
-                <button
-                  onClick={() => {
-                    setPastedData('');
-                    setDataAnalysisCells([]);
-                  }}
-                  className="bg-gray-500 text-white px-4 py-2 rounded-md hover:bg-gray-600"
-                >
-                  Clear All
-                </button>
-              </div>
-            </div>
-          </div>
-
-
-
           {/* Analysis Results */}
           <div className="space-y-4">
-            <h4 className="text-lg font-medium">Analysis Results</h4>
             {dataAnalysisCells.length === 0 ? (
               <div className="text-center py-8 text-gray-500">
-                <p>No analysis results yet. Paste data and click "Analyze with AI" to get started.</p>
+                <p>No analysis results yet. Use the action buttons on the right to upload, paste, or generate data.</p>
               </div>
             ) : (
               dataAnalysisCells.map((cell) => renderAnalysisCell(cell))
@@ -1850,19 +1849,181 @@ ${analysisResult.data_quality?.recommendations?.map(rec => `- ${rec}`).join('\n'
         </div>
       </div>
 
-      {/* Right Panel - Data Sources */}
+      {/* Right Panel - Action Buttons and Data Sources */}
       <div className="w-80 flex flex-col p-4 bg-gray-50">
-        <h3 className="text-lg font-semibold text-gray-800 mb-4">Data Sources</h3>
+        <h3 className="text-lg font-semibold text-gray-800 mb-4">Data Management</h3>
+        
+        {/* Action Buttons */}
+        <div className="space-y-2 mb-4">
+          <button
+            onClick={() => {
+              setShowUploadSection(!showUploadSection);
+              // Clear file upload when closing the section
+              if (showUploadSection) {
+                setFileUpload(null);
+                const fileInput = document.getElementById('file-upload') as HTMLInputElement;
+                if (fileInput) fileInput.value = '';
+              }
+            }}
+            className="w-full flex items-center justify-between p-3 bg-white border border-gray-200 rounded-lg hover:border-blue-300 transition-colors"
+          >
+            <div className="flex items-center space-x-2">
+              <svg className="w-5 h-5 text-blue-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
+              </svg>
+              <span className="font-medium text-gray-800">Upload File</span>
+            </div>
+            <svg className={`w-5 h-5 text-gray-400 transition-transform ${showUploadSection ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+            </svg>
+          </button>
+
+          <button
+            onClick={() => {
+              setShowPasteSection(!showPasteSection);
+              // Clear pasted data when closing the section
+              if (showPasteSection) {
+                setPastedData('');
+              }
+            }}
+            className="w-full flex items-center justify-between p-3 bg-white border border-gray-200 rounded-lg hover:border-blue-300 transition-colors"
+          >
+            <div className="flex items-center space-x-2">
+              <svg className="w-5 h-5 text-green-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+              </svg>
+              <span className="font-medium text-gray-800">Paste Data</span>
+            </div>
+            <svg className={`w-5 h-5 text-gray-400 transition-transform ${showPasteSection ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+            </svg>
+          </button>
+
+          <button
+            onClick={() => setShowGenerateSection(!showGenerateSection)}
+            className="w-full flex items-center justify-between p-3 bg-white border border-gray-200 rounded-lg hover:border-blue-300 transition-colors"
+          >
+            <div className="flex items-center space-x-2">
+              <svg className="w-5 h-5 text-purple-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
+              </svg>
+              <span className="font-medium text-gray-800">Generate Data</span>
+            </div>
+            <svg className={`w-5 h-5 text-gray-400 transition-transform ${showGenerateSection ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+            </svg>
+          </button>
+        </div>
+
+        {/* Collapsible Sections */}
+        <div className="space-y-3 mb-4">
+          {/* Upload File Section */}
+          {showUploadSection && (
+            <div className="p-4 bg-white border border-gray-200 rounded-lg">
+              <h4 className="text-sm font-medium text-gray-700 mb-3">Upload Data File</h4>
+              <div className="space-y-3">
+                <div>
+                  <input
+                    id="file-upload"
+                    type="file"
+                    accept=".csv,.json,.parquet,.xlsx,.xls,.tsv"
+                    onChange={handleFileUpload}
+                    className="block w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-cedar-50 file:text-cedar-700 hover:file:bg-cedar-100"
+                  />
+                </div>
+                {fileUpload && (
+                  <div className="space-y-2">
+                    <span className="text-sm text-gray-600">
+                      Selected: {fileUpload.name} ({formatFileSize(fileUpload.size)})
+                    </span>
+                    <button
+                      onClick={uploadFile}
+                      disabled={uploading}
+                      className="w-full bg-green-500 text-white px-3 py-2 rounded text-sm hover:bg-green-600 disabled:opacity-50"
+                    >
+                      {uploading ? 'Uploading...' : 'Upload & Analyze'}
+                    </button>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* Paste Data Section */}
+          {showPasteSection && (
+            <div className="p-4 bg-white border border-gray-200 rounded-lg">
+              <h4 className="text-sm font-medium text-gray-700 mb-3">Analyze Pasted Data</h4>
+              <div className="space-y-3">
+                <div>
+                  <textarea
+                    value={pastedData}
+                    onChange={(e) => setPastedData(e.target.value)}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 font-mono text-sm"
+                    placeholder="Paste CSV, JSON, TSV, or any structured data here..."
+                    rows={4}
+                  />
+                </div>
+                <div className="flex space-x-2">
+                  <button
+                    onClick={analyzePastedData}
+                    disabled={!pastedData.trim() || analyzingPastedData}
+                    className="flex-1 bg-blue-500 text-white px-3 py-2 rounded text-sm hover:bg-blue-600 disabled:opacity-50"
+                  >
+                    {analyzingPastedData ? 'Analyzing...' : 'Analyze'}
+                  </button>
+                  <button
+                    onClick={() => setPastedData('')}
+                    className="px-3 py-2 bg-gray-500 text-white rounded text-sm hover:bg-gray-600"
+                  >
+                    Clear
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Generate Data Section */}
+          {showGenerateSection && (
+            <div className="p-4 bg-white border border-gray-200 rounded-lg">
+              <h4 className="text-sm font-medium text-gray-700 mb-3">Generate Sample Data</h4>
+              <div className="space-y-3">
+                <p className="text-xs text-gray-600">
+                  Generate sample datasets for testing and development.
+                </p>
+                <button
+                  onClick={() => {
+                    // TODO: Implement data generation
+                    alert('Data generation feature coming soon!');
+                  }}
+                  className="w-full bg-purple-500 text-white px-3 py-2 rounded text-sm hover:bg-purple-600"
+                >
+                  Generate Sample Data
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* Data Sources List */}
         <div className="flex-1 overflow-y-auto space-y-3">
+          <h4 className="text-sm font-medium text-gray-700">Data Sources</h4>
+          
           {/* Processed Data Sources */}
           {processedDataSources.length > 0 && (
             <>
-              <h4 className="text-sm font-medium text-gray-700 mb-2">Processed Data</h4>
+              <h5 className="text-xs font-medium text-gray-600 mb-2">Processed Data</h5>
               {processedDataSources.map((source) => (
                 <div key={source.id} className="p-3 bg-white border border-green-200 rounded-lg hover:border-green-300 transition-colors">
                   <div className="flex items-start justify-between">
                     <div className="flex-1">
-                      <h5 className="font-medium text-gray-800 text-sm">{source.display_name}</h5>
+                      <button
+                        onClick={() => setSelectedFileId(selectedFileId === source.id ? null : source.id)}
+                        className="text-left w-full"
+                      >
+                        <h5 className={`font-medium text-sm ${selectedFileId === source.id ? 'text-blue-600' : 'text-gray-800'} hover:text-blue-600 transition-colors`}>
+                          {source.display_name}
+                        </h5>
+                      </button>
                       <p className="text-xs text-gray-500 mt-1">
                         {source.table_name} • {source.storage_format?.toUpperCase() || 'PARQUET'}
                       </p>
@@ -1876,7 +2037,6 @@ ${analysisResult.data_quality?.recommendations?.map(rec => `- ${rec}`).join('\n'
                         <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-green-100 text-green-800">
                           Ready for Query
                         </span>
-
                       </div>
                     </div>
                   </div>
@@ -1888,12 +2048,19 @@ ${analysisResult.data_quality?.recommendations?.map(rec => `- ${rec}`).join('\n'
           {/* Uploaded Files */}
           {dataFileInfos.length > 0 && (
             <>
-              <h4 className="text-sm font-medium text-gray-700 mb-2">Uploaded Files</h4>
+              <h5 className="text-xs font-medium text-gray-600 mb-2">Uploaded Files</h5>
               {dataFileInfos.map((fileInfo) => (
                 <div key={fileInfo.id} className="p-3 bg-white border border-gray-200 rounded-lg hover:border-blue-300 transition-colors">
                   <div className="flex items-start justify-between">
                     <div className="flex-1">
-                      <h5 className="font-medium text-gray-800 text-sm">{fileInfo.name}</h5>
+                      <button
+                        onClick={() => setSelectedFileId(selectedFileId === fileInfo.id ? null : fileInfo.id)}
+                        className="text-left w-full"
+                      >
+                        <h5 className={`font-medium text-sm ${selectedFileId === fileInfo.id ? 'text-blue-600' : 'text-gray-800'} hover:text-blue-600 transition-colors`}>
+                          {fileInfo.name}
+                        </h5>
+                      </button>
                       <p className="text-xs text-gray-500 mt-1">
                         {fileInfo.file_type.toUpperCase()} • {formatFileSize(fileInfo.size_bytes)}
                       </p>
@@ -1912,15 +2079,155 @@ ${analysisResult.data_quality?.recommendations?.map(rec => `- ${rec}`).join('\n'
             </>
           )}
 
-          {/* No Data Sources */}
-          {processedDataSources.length === 0 && dataFileInfos.length === 0 && (
-            <div className="text-center py-8 text-gray-500">
-              <p>No data sources found.</p>
-              <p className="text-xs mt-1">Paste data or upload files to get started.</p>
+          {/* File Metadata Display */}
+          {selectedFileId && getSelectedFileMetadata() && (
+            <div className="mt-4 p-4 bg-blue-50 border border-blue-200 rounded-lg">
+              <h4 className="text-sm font-medium text-blue-900 mb-3">File Metadata</h4>
+              {(() => {
+                const metadata = getSelectedFileMetadata();
+                if (!metadata) return null;
+                
+                if (metadata.type === 'processed') {
+                  const data = metadata.data;
+                  return (
+                    <div className="space-y-3">
+                      {/* Summary */}
+                      <div>
+                        <h5 className="text-xs font-medium text-blue-800 mb-1">Summary</h5>
+                        <p className="text-xs text-blue-700">{data.description || 'No summary available'}</p>
+                      </div>
+                      
+                      {/* Number of Records */}
+                      <div>
+                        <h5 className="text-xs font-medium text-blue-800 mb-1">Number of Records</h5>
+                        <p className="text-xs text-blue-700">{data.estimated_rows?.toLocaleString() || 'Unknown'} rows</p>
+                      </div>
+                      
+                      {/* Column Titles */}
+                      <div>
+                        <h5 className="text-xs font-medium text-blue-800 mb-1">Column Titles</h5>
+                        <div className="flex flex-wrap gap-1">
+                          {data.columns?.map((col: any, index: number) => (
+                            <span key={index} className="inline-flex items-center px-2 py-1 rounded text-xs font-medium bg-blue-100 text-blue-800">
+                              {col.name}
+                            </span>
+                          )) || (
+                            <span className="text-xs text-blue-600">No column information available</span>
+                          )}
+                        </div>
+                      </div>
+                      
+                      {/* First 5 Rows */}
+                      <div>
+                        <h5 className="text-xs font-medium text-blue-800 mb-1">First 5 Rows</h5>
+                        {data.sample_data && data.sample_data.length > 0 ? (
+                          <div className="bg-white border border-blue-200 rounded p-2 max-h-32 overflow-y-auto">
+                            <table className="w-full text-xs">
+                              <thead>
+                                <tr>
+                                  {data.columns?.map((col: any, index: number) => (
+                                    <th key={index} className="text-left p-1 font-medium text-blue-800 border-b border-blue-200">
+                                      {col.name}
+                                    </th>
+                                  ))}
+                                </tr>
+                              </thead>
+                              <tbody>
+                                {data.sample_data.slice(0, 5).map((row: any[], rowIndex: number) => (
+                                  <tr key={rowIndex}>
+                                    {row.map((cell: any, cellIndex: number) => (
+                                      <td key={cellIndex} className="p-1 text-blue-700 border-b border-blue-100">
+                                        {String(cell).length > 20 ? String(cell).substring(0, 20) + '...' : String(cell)}
+                                      </td>
+                                    ))}
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                          </div>
+                        ) : (
+                          <p className="text-xs text-blue-600">No sample data available</p>
+                        )}
+                      </div>
+                    </div>
+                  );
+                } else if (metadata.type === 'uploaded') {
+                  const data = metadata.data;
+                  return (
+                    <div className="space-y-3">
+                      {/* Summary */}
+                      <div>
+                        <h5 className="text-xs font-medium text-blue-800 mb-1">Summary</h5>
+                        <p className="text-xs text-blue-700">{data.data_summary || 'No summary available'}</p>
+                      </div>
+                      
+                      {/* Number of Records */}
+                      <div>
+                        <h5 className="text-xs font-medium text-blue-800 mb-1">Number of Records</h5>
+                        <p className="text-xs text-blue-700">{data.row_count?.toLocaleString() || 'Unknown'} rows</p>
+                      </div>
+                      
+                      {/* Column Titles */}
+                      <div>
+                        <h5 className="text-xs font-medium text-blue-800 mb-1">Column Titles</h5>
+                        <div className="flex flex-wrap gap-1">
+                          {data.columns?.map((col: any, index: number) => (
+                            <span key={index} className="inline-flex items-center px-2 py-1 rounded text-xs font-medium bg-blue-100 text-blue-800">
+                              {col.name}
+                            </span>
+                          )) || (
+                            <span className="text-xs text-blue-600">No column information available</span>
+                          )}
+                        </div>
+                      </div>
+                      
+                      {/* First 5 Rows */}
+                      <div>
+                        <h5 className="text-xs font-medium text-blue-800 mb-1">First 5 Rows</h5>
+                        {data.sample_data && data.sample_data.length > 0 ? (
+                          <div className="bg-white border border-blue-200 rounded p-2 max-h-32 overflow-y-auto">
+                            <table className="w-full text-xs">
+                              <thead>
+                                <tr>
+                                  {data.columns?.map((col: any, index: number) => (
+                                    <th key={index} className="text-left p-1 font-medium text-blue-800 border-b border-blue-200">
+                                      {col.name}
+                                    </th>
+                                  ))}
+                                </tr>
+                              </thead>
+                              <tbody>
+                                {data.sample_data.slice(0, 5).map((row: any[], rowIndex: number) => (
+                                  <tr key={rowIndex}>
+                                    {row.map((cell: any, cellIndex: number) => (
+                                      <td key={cellIndex} className="p-1 text-blue-700 border-b border-blue-100">
+                                        {String(cell).length > 20 ? String(cell).substring(0, 20) + '...' : String(cell)}
+                                      </td>
+                                    ))}
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                          </div>
+                        ) : (
+                          <p className="text-xs text-blue-600">No sample data available</p>
+                        )}
+                      </div>
+                    </div>
+                  );
+                }
+                return null;
+              })()}
             </div>
           )}
 
-
+          {/* No Data Sources */}
+          {processedDataSources.length === 0 && dataFileInfos.length === 0 && (
+            <div className="text-center py-8 text-gray-500">
+              <p className="text-sm">No data sources found.</p>
+              <p className="text-xs mt-1">Use the buttons above to add data.</p>
+            </div>
+          )}
         </div>
       </div>
     </div>

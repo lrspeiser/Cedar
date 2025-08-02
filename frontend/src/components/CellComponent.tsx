@@ -58,6 +58,22 @@ interface Cell {
     isRerun?: boolean;
     originalCellId?: string;
     userComment?: string;
+    // Analysis cell properties
+    rustAnalysis?: any;
+    llmAnalysis?: any;
+    analysisCellId?: string;
+    projectId?: string;
+    type?: string;
+    // Additional properties for research cells
+    goal?: string;
+    background_summary?: string;
+    existingDataFiles?: any[];
+    dataNeeded?: string;
+    availableDataFiles?: any[];
+    llmEvaluation?: any;
+    phase?: string;
+    context?: string;
+    analysisType?: string;
   };
   requiresUserAction?: boolean;
   canProceed?: boolean;
@@ -749,9 +765,42 @@ const CellComponent: React.FC<CellComponentProps> = ({ cell, onExecute, onNextSt
         return (
           <div className="space-y-4">
             <div className="bg-indigo-50 border border-indigo-200 rounded-lg p-4">
-              <h4 className="text-lg font-medium text-indigo-900 mb-2">Data Analysis Script</h4>
+              <h4 className="text-lg font-medium text-indigo-900 mb-2">Data Analysis</h4>
               <div className="prose prose-sm max-w-none">
-                <div className="whitespace-pre-wrap text-indigo-800 mb-4">{cell.content}</div>
+                <div className="whitespace-pre-wrap text-indigo-800 font-mono text-sm bg-black bg-opacity-5 p-3 rounded border mb-4">
+                  {cell.content}
+                  {cell.metadata?.isStreaming && (
+                    <span className="inline-block w-2 h-4 bg-indigo-500 ml-1 animate-pulse"></span>
+                  )}
+                </div>
+                
+                {/* Show Rust analysis if available */}
+                {cell.metadata?.rustAnalysis && (
+                  <div className="mt-4 p-3 bg-blue-100 rounded">
+                    <h5 className="font-medium text-blue-900 mb-2">🔧 Rust Analysis</h5>
+                    <div className="text-sm text-blue-800">
+                      <p><strong>File Type:</strong> {cell.metadata.rustAnalysis.metadata?.file_type}</p>
+                      <p><strong>Total Records:</strong> {cell.metadata.rustAnalysis.metadata?.total_records?.toLocaleString()}</p>
+                      <p><strong>Columns:</strong> {cell.metadata.rustAnalysis.metadata?.column_count}</p>
+                      <p><strong>Has Headers:</strong> {cell.metadata.rustAnalysis.metadata?.has_headers ? 'Yes' : 'No'}</p>
+                    </div>
+                  </div>
+                )}
+                
+                {/* Show LLM analysis if available */}
+                {cell.metadata?.llmAnalysis && (
+                  <div className="mt-4 p-3 bg-green-100 rounded">
+                    <h5 className="font-medium text-green-900 mb-2">🤖 LLM Analysis</h5>
+                    <div className="text-sm text-green-800">
+                      <p><strong>Analysis Result:</strong> Available</p>
+                      {cell.metadata.llmAnalysis.background_summary && (
+                        <p><strong>Summary:</strong> {cell.metadata.llmAnalysis.background_summary.substring(0, 200)}...</p>
+                      )}
+                    </div>
+                  </div>
+                )}
+                
+                {/* Show analysis script if available */}
                 {cell.metadata?.analysisScript && (
                   <div className="mt-4">
                     <h5 className="font-medium text-indigo-900 mb-2">Generated Analysis Script:</h5>
@@ -985,7 +1034,7 @@ const CellComponent: React.FC<CellComponentProps> = ({ cell, onExecute, onNextSt
                   className="flex items-center space-x-1 px-4 py-2 bg-green-500 text-white text-sm rounded-md hover:bg-green-600 transition-colors"
                 >
                   <ChevronRight className="h-4 w-4" />
-                  <span>Next: {getNextStepLabel(cell)}</span>
+                  <span>Next: {getNextStepLabel()}</span>
                 </button>
               </div>
             </div>

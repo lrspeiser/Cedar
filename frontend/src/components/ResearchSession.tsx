@@ -96,6 +96,22 @@ interface Cell {
     isRerun?: boolean;
     originalCellId?: string;
     userComment?: string;
+    // Analysis cell properties
+    rustAnalysis?: any;
+    llmAnalysis?: any;
+    analysisCellId?: string;
+    projectId?: string;
+    type?: string;
+    // Additional properties for research cells
+    goal?: string;
+    background_summary?: string;
+    existingDataFiles?: any[];
+    dataNeeded?: string;
+    availableDataFiles?: any[];
+    llmEvaluation?: any;
+    phase?: string;
+    context?: string;
+    analysisType?: string;
   };
   requiresUserAction?: boolean;
   canProceed?: boolean;
@@ -419,6 +435,9 @@ const ResearchSession: React.FC<ResearchSessionProps> = ({
   const [researchPlan, setResearchPlan] = useState<ResearchPlan | null>(null);
   const [dataRouter] = useState(() => new DataRouterService(projectId));
   
+  // Analysis cells from DataTab
+  const [analysisCells, setAnalysisCells] = useState<any[]>([]);
+  
   // Multi-threaded execution system
   const [executionThreads, setExecutionThreads] = useState<Map<string, ExecutionThread>>(new Map());
   const [activeThreadId, setActiveThreadId] = useState<string | null>(null);
@@ -484,6 +503,7 @@ const ResearchSession: React.FC<ResearchSessionProps> = ({
     if (sessionId && !sessionLoaded) {
       console.log('🔄 Loading session for the first time:', sessionId);
       loadSession();
+      loadAnalysisCells(); // Load analysis cells from DataTab
       // Reset loading state when loading a session to prevent stuck states
       setIsLoading(false);
     }
@@ -502,6 +522,7 @@ const ResearchSession: React.FC<ResearchSessionProps> = ({
       const pollInterval = setInterval(() => {
         console.log('🔄 Polling for session updates...');
         loadSession();
+        loadAnalysisCells(); // Also refresh analysis cells
       }, 2000); // Check every 2 seconds to reduce load
       
       return () => {
@@ -576,6 +597,48 @@ const ResearchSession: React.FC<ResearchSessionProps> = ({
       }
     }
   }, [pendingNotebookEntry]);
+
+  const loadAnalysisCells = async () => {
+    try {
+      console.log('📋 Loading analysis cells for project:', projectId);
+      const response = await apiService.listAnalysisCells({ projectId });
+      if (response && Array.isArray(response)) {
+        console.log('✅ Loaded analysis cells:', response.length);
+        setAnalysisCells(response);
+        
+        // Convert analysis cells to notebook cells and add them to the session
+        const analysisNotebookCells: Cell[] = response.map((analysisCell: any) => ({
+          id: `analysis-${analysisCell.id}`,
+          type: 'data_analysis' as any,
+          content: analysisCell.content,
+          timestamp: analysisCell.timestamp,
+          status: analysisCell.status as any,
+          metadata: {
+            ...analysisCell.metadata,
+            rustAnalysis: analysisCell.rust_analysis,
+            llmAnalysis: analysisCell.llm_analysis,
+            analysisCellId: analysisCell.id,
+            projectId: analysisCell.project_id,
+            type: analysisCell.type_
+          }
+        }));
+        
+        // Add analysis cells to the main cells array if they're not already there
+        setCells(prevCells => {
+          const existingAnalysisIds = new Set(prevCells.filter(cell => cell.type === 'data_analysis').map(cell => cell.metadata?.analysisCellId));
+          const newAnalysisCells = analysisNotebookCells.filter(cell => !existingAnalysisIds.has(cell.metadata?.analysisCellId));
+          
+          if (newAnalysisCells.length > 0) {
+            console.log('📝 Adding analysis cells to notebook:', newAnalysisCells.length);
+            return [...prevCells, ...newAnalysisCells];
+          }
+          return prevCells;
+        });
+      }
+    } catch (error) {
+      console.error('Failed to load analysis cells:', error);
+    }
+  };
 
   const loadSession = async () => {
     try {
@@ -2084,7 +2147,7 @@ const ResearchSession: React.FC<ResearchSessionProps> = ({
             stepId: nextStep.id,
             stepOrder: currentStep + 1,
             totalSteps,
-            phase: nextStep,
+            phase: nextStep.title,
             plan: researchPlan,
           },
         };
