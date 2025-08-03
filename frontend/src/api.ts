@@ -1612,7 +1612,9 @@ Please provide a comprehensive search with proper citations and URLs.`;
   async listAnalysisCells(request: { projectId: string }) {
     try {
       console.log('📋 Listing analysis cells...');
-      const response = await invoke('list_analysis_cells', request);
+      const response = await invoke('list_analysis_cells', {
+        project_id: request.projectId
+      });
       console.log('✅ Analysis cells listed:', response);
       return response;
     } catch (error) {

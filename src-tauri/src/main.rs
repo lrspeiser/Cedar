@@ -242,6 +242,7 @@ struct UploadDataFileRequest {
     file_type: Option<String>, // Auto-detected if not provided
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
 struct UploadDataFileWithNotebookRequest {
     project_id: String,
     filename: String,

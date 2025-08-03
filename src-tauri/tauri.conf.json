@@ -5,8 +5,8 @@
   "identifier": "com.cedar.research",
   "build": {
     "frontendDist": "../frontend/dist",
-    "devUrl": "http://localhost:3000",
-    "beforeDevCommand": "cd ../frontend && npm run dev",
+    "devUrl": "http://localhost:3001",
+    "beforeDevCommand": "",
     "beforeBuildCommand": "cd ../frontend && npm run build"
   },
   "app": {
