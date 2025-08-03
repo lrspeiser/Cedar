@@ -424,7 +424,7 @@ mod tests {
 
         let result = FileAnalyzer::analyze_file(temp_file.path().to_str().unwrap()).unwrap();
         assert!(result.success);
-        assert_eq!(result.first_10_lines.len(), 3);
+        assert_eq!(result.first_10_lines.len(), 4); // 4 lines: header + 3 data rows
         
         let metadata = result.metadata.unwrap();
         assert_eq!(metadata.column_count, 3);

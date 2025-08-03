@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { apiService } from '../api';
+import { logger } from '../utils/logger';
 
 interface DataTabProps {
   projectId: string;
@@ -48,7 +49,7 @@ interface DataAnalysisCell {
   is_streaming: boolean;
 }
 
-const DataTab: React.FC<DataTabProps> = ({ projectId, dataFiles: _dataFiles, onDataFilesUpdate: _onDataFilesUpdate, onAddNotebookEntry }) => {
+const DataTab: React.FC<DataTabProps> = ({ projectId, dataFiles: _dataFiles, onDataFilesUpdate: _onDataFilesUpdate, onAddNotebookEntry: _onAddNotebookEntry }) => {
   // UI State
   const [pastedData, setPastedData] = useState('');
   const [fileUpload, setFileUpload] = useState<File | null>(null);
@@ -81,11 +82,17 @@ const DataTab: React.FC<DataTabProps> = ({ projectId, dataFiles: _dataFiles, onD
   const loadDataFiles = async () => {
     try {
       setLoadingDataFiles(true);
+      logger.info('DataTab', 'Loading data files', { projectId });
       const response = await apiService.listDataFiles({ projectId }) as any;
+      logger.info('DataTab', 'List data files response', { response });
       if (response.data_files) {
         setDataFileInfos(response.data_files);
+        logger.info('DataTab', 'Data files loaded successfully', { count: response.data_files.length });
+      } else {
+        logger.warn('DataTab', 'No data_files in response', { response });
       }
     } catch (error) {
+      logger.error('DataTab', 'Failed to load data files', { error, projectId });
       console.error('Failed to load data files:', error);
     } finally {
       setLoadingDataFiles(false);
@@ -113,15 +120,35 @@ const DataTab: React.FC<DataTabProps> = ({ projectId, dataFiles: _dataFiles, onD
   };
 
   const uploadFile = async () => {
-    if (!fileUpload) return;
+    if (!fileUpload) {
+      logger.warn('DataTab', 'No file selected for upload');
+      return;
+    }
 
     try {
       setUploading(true);
+      logger.info('DataTab', 'Starting file upload', { 
+        filename: fileUpload.name, 
+        size: fileUpload.size, 
+        type: fileUpload.type,
+        projectId 
+      });
       
       // Read file content
       const content = await readFileAsText(fileUpload);
+      logger.info('DataTab', 'File content read successfully', { 
+        contentLength: content.length,
+        preview: content.substring(0, 200) + '...'
+      });
       
       // Call Rust backend to handle ALL processing
+      logger.info('DataTab', 'Calling uploadDataFile API', {
+        projectId,
+        filename: fileUpload.name,
+        contentLength: content.length,
+        fileType: fileUpload.type || undefined
+      });
+
       const result = await apiService.uploadDataFile({
         projectId,
         filename: fileUpload.name,
@@ -129,6 +156,7 @@ const DataTab: React.FC<DataTabProps> = ({ projectId, dataFiles: _dataFiles, onD
         fileType: fileUpload.type || undefined
       });
 
+      logger.info('DataTab', 'File upload API call successful', { result });
       console.log('File upload result:', result);
       
       // Reload data files to show the new file
@@ -138,7 +166,15 @@ const DataTab: React.FC<DataTabProps> = ({ projectId, dataFiles: _dataFiles, onD
       setFileUpload(null);
       setShowUploadSection(false);
       
+      logger.info('DataTab', 'File upload completed successfully');
+      
     } catch (error) {
+      logger.error('DataTab', 'File upload failed', { 
+        error: error instanceof Error ? error.toString() : String(error),
+        errorObject: error,
+        filename: fileUpload?.name,
+        projectId 
+      });
       console.error('File upload failed:', error);
       alert('File upload failed. Please try again.');
     } finally {
@@ -152,12 +188,18 @@ const DataTab: React.FC<DataTabProps> = ({ projectId, dataFiles: _dataFiles, onD
 
   const analyzePastedData = async () => {
     if (!pastedData.trim()) {
+      logger.warn('DataTab', 'No pasted data to analyze');
       alert('Please paste some data to analyze');
       return;
     }
 
     try {
       setAnalyzingPastedData(true);
+      logger.info('DataTab', 'Starting pasted data analysis', { 
+        dataLength: pastedData.length,
+        preview: pastedData.substring(0, 200) + '...',
+        projectId 
+      });
       
       // Call Rust backend to handle ALL processing
       const result = await apiService.uploadDataFile({
@@ -167,6 +209,7 @@ const DataTab: React.FC<DataTabProps> = ({ projectId, dataFiles: _dataFiles, onD
         fileType: 'csv'
       });
 
+      logger.info('DataTab', 'Pasted data analysis successful', { result });
       console.log('Pasted data analysis result:', result);
       
       // Reload data files to show the new file
@@ -176,7 +219,15 @@ const DataTab: React.FC<DataTabProps> = ({ projectId, dataFiles: _dataFiles, onD
       setPastedData('');
       setShowPasteSection(false);
       
+      logger.info('DataTab', 'Pasted data analysis completed successfully');
+      
     } catch (error) {
+      logger.error('DataTab', 'Pasted data analysis failed', { 
+        error: error instanceof Error ? error.toString() : String(error),
+        errorObject: error,
+        dataLength: pastedData.length,
+        projectId 
+      });
       console.error('Pasted data analysis failed:', error);
       alert('Data analysis failed. Please try again.');
     } finally {
@@ -194,7 +245,7 @@ const DataTab: React.FC<DataTabProps> = ({ projectId, dataFiles: _dataFiles, onD
       const result = await apiService.callLLM({
         prompt: "Generate a sample CSV dataset with 10 rows and 5 columns of realistic data. Include headers.",
         context: "Data generation for testing purposes",
-        user_comment: "Generate sample data for the user"
+        userComment: "Generate sample data for the user"
       });
 
       console.log('Generated data result:', result);

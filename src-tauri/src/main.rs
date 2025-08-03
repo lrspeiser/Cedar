@@ -6,17 +6,16 @@ mod tests;
 
 use tauri::State;
 use serde::{Deserialize, Serialize};
-use serde_json::Value as JsonValue;
 use std::sync::Mutex;
 use std::collections::HashMap;
 use std::env;
 use std::io::{self, Write};
-use cedar::{cell, agent, context, executor, llm, storage};
-use cedar::executor::{ExecutionResult, StepEvaluation};
-use cedar::storage::{DataFileInfo, ColumnInfo, DataAnalysisRequest, DataAnalysisResponse, ColumnAnalysis, Visualization, create_duckdb_table, DataAnalysisCell};
+use cedar::{cell, llm, storage};
+use cedar::storage::{DataFileInfo, ColumnInfo, DataAnalysisRequest, DataAnalysisResponse, Visualization, DataAnalysisCell};
 use std::fs;
 use std::path::PathBuf;
 use uuid::Uuid;
+use chrono;
 
 /// Application State Management
 /// 
@@ -1063,7 +1062,7 @@ async fn extract_variables_from_code(
     project_id: &str,
     state: &State<'_, AppState>,
 ) -> Result<(), String> {
-    use regex::Regex;
+    
     
     // Enhanced variable extraction with comprehensive metadata
     let lines: Vec<&str> = code.lines().collect();
@@ -1140,7 +1139,7 @@ fn infer_variable_info_enhanced(
     lines: &[&str], 
     line_num: usize
 ) -> (String, Option<String>, String, Option<String>, Vec<String>) {
-    use regex::Regex;
+    
     
     let value_part = value_part.trim();
     let mut tags = Vec::new();

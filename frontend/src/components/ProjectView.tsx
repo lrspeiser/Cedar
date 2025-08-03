@@ -143,7 +143,7 @@ const ProjectView: React.FC<ProjectViewProps> = ({ project, onBack }) => {
       // Start research session
       const sessionId = `session_${project.id}`;
       
-      const response = await apiService.startResearch({
+      await apiService.startResearch({
         projectId: project.id,
         sessionId: sessionId,
         goal: researchGoal,

@@ -276,7 +276,7 @@ const CellComponent: React.FC<CellComponentProps> = ({ cell, onExecute, onNextSt
         return 'Data Assessment';
       case 'data_assessment':
         // Check if we have data files to determine next step
-        const hasDataFiles = cell.metadata?.existingDataFiles?.length > 0;
+        const hasDataFiles = cell.metadata?.existingDataFiles?.length && cell.metadata.existingDataFiles.length > 0;
         return hasDataFiles ? 'Analysis Planning' : 'Data Collection';
       case 'data_collection':
         return 'Analysis Planning';

@@ -45,7 +45,7 @@ const CodeTab: React.FC<CodeTabProps> = ({ projectId }) => {
   const [libraries, setLibraries] = useState<Library[]>([]);
   const [variables, setVariables] = useState<VariableInfo[]>([]);
   const [codeFiles, setCodeFiles] = useState<CodeFile[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [_loading, setLoading] = useState(true);
   const [installing, setInstalling] = useState<string | null>(null);
   const [showNewCodeForm, setShowNewCodeForm] = useState(false);
   const [generatingCode, setGeneratingCode] = useState(false);

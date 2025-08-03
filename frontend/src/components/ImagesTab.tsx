@@ -31,8 +31,8 @@ const ImagesTab: React.FC<ImagesTabProps> = ({ projectId, images, onImagesUpdate
   const [showPreview, setShowPreview] = useState(false);
 
   // Dynamic imports for visualization libraries
-  const [vegaEmbed, setVegaEmbed] = useState<any>(null);
-  const [Plotly, setPlotly] = useState<any>(null);
+  const [_vegaEmbed, _setVegaEmbed] = useState<any>(null);
+  const [_Plotly, _setPlotly] = useState<any>(null);
 
   useEffect(() => {
     // Temporarily disabled visualization libraries to fix build issues
@@ -60,7 +60,7 @@ const ImagesTab: React.FC<ImagesTabProps> = ({ projectId, images, onImagesUpdate
       setLoading(true);
       
       let parsedContent = newImageData;
-      let visualizationType = newVisualizationType;
+      // let _visualizationType = newVisualizationType;
       let spec = null;
       let data = null;
       let layout = null;
@@ -125,15 +125,15 @@ const ImagesTab: React.FC<ImagesTabProps> = ({ projectId, images, onImagesUpdate
     }
   };
 
-  const renderVegaLiteChart = (spec: any, containerId: string) => {
-    // Temporarily disabled
-    console.log('Vega-Lite rendering disabled for now');
-  };
+  // const renderVegaLiteChart = (_spec: any, _containerId: string) => {
+  //   // Temporarily disabled
+  //   console.log('Vega-Lite rendering disabled for now');
+  // };
 
-  const renderPlotlyChart = (data: any, layout: any, containerId: string) => {
-    // Temporarily disabled
-    console.log('Plotly rendering disabled for now');
-  };
+  // const renderPlotlyChart = (_data: any, _layout: any, _containerId: string) => {
+  //   // Temporarily disabled
+  //   console.log('Plotly rendering disabled for now');
+  // };
 
   const renderVisualization = (visualization: Visualization) => {
     const containerId = `viz-${visualization.name.replace(/\s+/g, '-')}`;
@@ -142,18 +142,18 @@ const ImagesTab: React.FC<ImagesTabProps> = ({ projectId, images, onImagesUpdate
       return (
         <div className="bg-white rounded-lg p-4 border">
           <div id={containerId} className="w-full h-64"></div>
-          {useEffect(() => {
-            renderVegaLiteChart(visualization.spec, containerId);
-          }, [])}
+          <div className="text-gray-400 text-center mt-2">
+            <p>Vega-Lite visualization preview</p>
+          </div>
         </div>
       );
     } else if (visualization.visualization_type === 'plotly' && visualization.data && visualization.layout) {
       return (
         <div className="bg-white rounded-lg p-4 border">
           <div id={containerId} className="w-full h-64"></div>
-          {useEffect(() => {
-            renderPlotlyChart(visualization.data, visualization.layout, containerId);
-          }, [])}
+          <div className="text-gray-400 text-center mt-2">
+            <p>Plotly visualization preview</p>
+          </div>
         </div>
       );
     } else {

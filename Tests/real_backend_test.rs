@@ -1,7 +1,3 @@
-use std::collections::HashMap;
-use std::sync::Mutex;
-use cedar::storage::{DataFileInfo, DataAnalysisCell};
-use serde_json::json;
 
 // Test data samples
 const SAMPLE_CSV_DATA: &str = r#"name,age,city,salary

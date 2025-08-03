@@ -193,7 +193,7 @@ const IntegratedResearchFlow: React.FC<IntegratedResearchFlowProps> = ({ onProje
     }
   };
 
-  const generateAbstract = async (goal: string, references: any[]): Promise<string> => {
+  const generateAbstract = async (goal: string, _references: any[]): Promise<string> => {
     try {
       // Use the existing initialize_research command to get background summary
       const response = await apiService.initializeResearch({
@@ -231,7 +231,7 @@ const IntegratedResearchFlow: React.FC<IntegratedResearchFlowProps> = ({ onProje
     }
   };
 
-  const generateData = async (plan: any): Promise<any[]> => {
+  const generateData = async (_plan: any): Promise<any[]> => {
     try {
       // For now, return empty array - data generation can be enhanced later
       return [];
@@ -241,7 +241,7 @@ const IntegratedResearchFlow: React.FC<IntegratedResearchFlowProps> = ({ onProje
     }
   };
 
-  const generateCode = async (plan: any, dataFiles: any[]): Promise<{ code: string; variables: any[]; libraries: any[] }> => {
+  const generateCode = async (plan: any, _dataFiles: any[]): Promise<{ code: string; variables: any[]; libraries: any[] }> => {
     try {
       // Generate basic Python code based on the plan
       const code = `# Research Analysis Script
@@ -304,7 +304,7 @@ print("Analysis completed!")
     }
   };
 
-  const evaluateResults = async (goal: string, results: any): Promise<{ evaluation: string; needsMoreData: boolean; nextSteps: string }> => {
+  const evaluateResults = async (goal: string, _results: any): Promise<{ evaluation: string; needsMoreData: boolean; nextSteps: string }> => {
     try {
       // Simple evaluation logic
       const evaluation = `Analysis completed for: ${goal}
@@ -331,7 +331,7 @@ The research has been completed successfully and is ready for final documentatio
     }
   };
 
-  const generateFinalWriteup = async (goal: string, abstract: string, results: any, evaluation: any): Promise<string> => {
+  const generateFinalWriteup = async (goal: string, _abstract: string, _results: any, _evaluation: any): Promise<string> => {
     try {
       // Generate a comprehensive write-up
       const writeup = `# Research Report: ${goal}
@@ -452,7 +452,7 @@ The analysis code executed successfully, establishing a solid foundation for fur
           const sessionId = `session_${newProject.id}`;
           
           // Start research session
-          const response = await apiService.startResearch({
+          await apiService.startResearch({
             projectId: newProject.id,
             sessionId: sessionId,
             goal: userGoal,

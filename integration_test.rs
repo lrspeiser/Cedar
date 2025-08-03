@@ -1,4 +1,4 @@
-use cedar::file_analyzer::{FileAnalyzer, FileAnalysisResult, FileMetadata};
+use cedar::file_analyzer::{FileAnalyzer, FileMetadata};
 use std::fs::write;
 use tempfile::NamedTempFile;
 

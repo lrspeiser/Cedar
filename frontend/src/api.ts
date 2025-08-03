@@ -32,6 +32,7 @@
  */
 
 import { invoke } from "@tauri-apps/api/core";
+import { logger } from './utils/logger';
 
 // Add logging function to save logs to files
 export const saveLogToFile = async (level: string, message: string) => {
@@ -875,6 +876,13 @@ class ApiService {
     content: string; 
     fileType?: string; 
   }) {
+    logger.info('ApiService', 'Starting uploadDataFile call', { 
+      projectId: request.projectId,
+      filename: request.filename,
+      contentLength: request.content.length,
+      fileType: request.fileType 
+    });
+    
     console.log('📁 Calling Tauri backend: upload_data_file', request);
     
     try {
@@ -886,10 +894,19 @@ class ApiService {
         file_type: request.fileType || null
       };
       
+      logger.info('ApiService', 'Calling Tauri invoke with backend request', { backendRequest });
+      
       const result = await invoke('upload_data_file', { request: backendRequest });
+      
+      logger.info('ApiService', 'uploadDataFile invoke successful', { result });
       console.log('✅ Backend data file uploaded successfully');
       return result;
     } catch (error) {
+      logger.error('ApiService', 'uploadDataFile invoke failed', { 
+        error: error instanceof Error ? error.toString() : String(error),
+        errorObject: error,
+        request 
+      });
       console.error('❌ Backend error uploading data file:', error);
       throw error;
     }
@@ -1029,6 +1046,7 @@ class ApiService {
   async listDataFiles(request: { 
     projectId: string; 
   }) {
+    logger.info('ApiService', 'Starting listDataFiles call', { projectId: request.projectId });
     console.log('📁 Calling Tauri backend: list_data_files', request);
     
     try {
@@ -1037,10 +1055,19 @@ class ApiService {
         project_id: request.projectId
       };
       
+      logger.info('ApiService', 'Calling Tauri invoke for list_data_files', { backendRequest });
+      
       const result = await invoke('list_data_files', { request: backendRequest });
+      
+      logger.info('ApiService', 'listDataFiles invoke successful', { result });
       console.log('✅ Backend data files listed successfully');
       return result;
     } catch (error) {
+      logger.error('ApiService', 'listDataFiles invoke failed', { 
+        error: error instanceof Error ? error.toString() : String(error),
+        errorObject: error,
+        request 
+      });
       console.error('❌ Backend error listing data files:', error);
       throw error;
     }

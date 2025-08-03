@@ -823,7 +823,7 @@ mod tests {
 
     #[test]
     fn test_data_management_integration() {
-        let mut state = create_test_app_state();
+        let state = create_test_app_state();
         
         // Create a project with data files
         let project = Project {
@@ -1418,7 +1418,7 @@ mod tests {
         };
         
         // Create a project with variables
-        let mut project = Project {
+        let project = Project {
             id: "project-123".to_string(),
             name: "Test Project".to_string(),
             goal: "Test goal".to_string(),
@@ -1465,7 +1465,7 @@ mod tests {
         };
         
         // Create a project with the variable
-        let mut project = Project {
+        let project = Project {
             id: "project-123".to_string(),
             name: "Test Project".to_string(),
             goal: "Test goal".to_string(),
@@ -1567,7 +1567,7 @@ mod tests {
         };
         
         // Create a project with libraries
-        let mut project = Project {
+        let project = Project {
             id: "project-123".to_string(),
             name: "Test Project".to_string(),
             goal: "Test goal".to_string(),
@@ -1600,7 +1600,7 @@ mod tests {
     fn test_install_library() {
         let state = create_test_app_state();
         
-        let mut library = Library {
+        let library = Library {
             name: "pandas".to_string(),
             version: Some("2.0.0".to_string()),
             source: "auto_detected".to_string(),
@@ -1611,7 +1611,7 @@ mod tests {
         };
         
         // Create a project with the library
-        let mut project = Project {
+        let project = Project {
             id: "project-123".to_string(),
             name: "Test Project".to_string(),
             goal: "Test goal".to_string(),
